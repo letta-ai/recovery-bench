@@ -2,27 +2,27 @@
 """
 Reorganize benchmark results by task description hash.
 
-Usage: python hash_reorganize.py <model_path> [--execute]
+Usage: python hash_reorganize.py <model_path> [--reverse]
 Example: python hash_reorganize.py runs/sample-claude-3-5-haiku
 
 Note: Run this script in the 'tbench' conda environment:
 conda activate tbench
 """
 
-import os
-import sys
-import hashlib
 import shutil
+import argparse
 from pathlib import Path
+import os
 from typing import Optional, Dict
 
+from .utils import create_task_hash
 from terminal_bench.handlers.trial_handler import Task
 
 
 def extract_task_description(task_name: str) -> Optional[str]:
     """Extract task description from terminal-bench task.yaml file."""
     try:
-        task_path = Path('/home/kevinlin/terminal-bench/tasks') / task_name / 'task.yaml'
+        task_path = Path(os.getenv("TASK_FOLDER")) / task_name / 'task.yaml'
         if not task_path.exists():
             print(f"Warning: Task file not found for {task_name}")
             return None
@@ -33,11 +33,6 @@ def extract_task_description(task_name: str) -> Optional[str]:
     except Exception as e:
         print(f"Error reading task {task_name}: {e}")
         return None
-
-
-def create_task_hash(task_description: str) -> str:
-    """Create 8-character hash from task description."""
-    return hashlib.sha256(task_description.encode('utf-8')).hexdigest()[:8]
 
 
 def find_task_directories(base_path: str) -> Dict[str, str]:
@@ -69,9 +64,29 @@ def find_task_directories(base_path: str) -> Dict[str, str]:
     return task_dirs
 
 
-def reorganize_directories(base_path: str, dry_run: bool = True) -> None:
-    """Reorganize directories by task hash."""
-    print(f"{'[DRY RUN] ' if dry_run else ''}Reorganizing {base_path}")
+def find_hash_directories(base_path: str) -> Dict[str, list]:
+    """Find directories with hash prefixes."""
+    hash_dirs = {}
+    base_path = Path(base_path)
+    
+    if not base_path.exists():
+        print(f"Error: Path {base_path} does not exist")
+        return hash_dirs
+    
+    for item in base_path.iterdir():
+        if item.is_dir() and not item.name.startswith('.') and not item.name.endswith(('.json', '.log', '.lock')):
+            # Check if this looks like a hash-prefixed directory (8 hex chars + dash + name)
+            if len(item.name) > 9 and item.name[8] == '-':
+                hash_part = item.name[:8]
+                if all(c in '0123456789abcdef' for c in hash_part.lower()):
+                    hash_dirs[hash_part] = [str(item)]
+    
+    return hash_dirs
+
+
+def reorganize_directories(base_path: str) -> None:
+    """Reorganize directories by adding task hash prefix."""
+    print(f"Reorganizing {base_path}")
     
     task_dirs = find_task_directories(base_path)
     if not task_dirs:
@@ -94,35 +109,75 @@ def reorganize_directories(base_path: str, dry_run: bool = True) -> None:
     for task_dir, task_hash in task_to_hash.items():
         task_name = Path(task_dir).name
         base_dir = Path(task_dir).parent
-        hash_dir = base_dir / task_hash
-        new_task_dir = hash_dir / task_name
+        new_task_dir = base_dir / f"{task_hash}-{task_name}"
         
-        if not dry_run:
-            try:
-                hash_dir.mkdir(exist_ok=True)
-                shutil.move(str(task_dir), str(new_task_dir))
-                print(f"    Moved to {hash_dir.name}/{task_name}")
-            except Exception as e:
-                print(f"    Error moving {task_dir}: {e}")
+        try:
+            shutil.move(str(task_dir), str(new_task_dir))
+            print(f"    Renamed to {task_hash}-{task_name}")
+        except Exception as e:
+            print(f"    Error renaming {task_dir}: {e}")
     
     print(f"Processed {len(task_to_hash)} tasks")
 
 
+def reverse_reorganize_directories(base_path: str) -> None:
+    """Reverse reorganization by removing hash prefixes from directory names."""
+    print(f"Reversing reorganization in {base_path}")
+    
+    hash_dirs = find_hash_directories(base_path)
+    if not hash_dirs:
+        print("No hash-prefixed directories found")
+        return
+    
+    moved_count = 0
+    
+    # Process hash-prefixed directories
+    for hash_prefix, task_dirs in hash_dirs.items():
+        for task_dir in task_dirs:
+            task_dir_path = Path(task_dir)
+            task_name = task_dir_path.name
+            
+            # Remove hash prefix (8 chars + dash)
+            original_name = task_name[9:]  # Remove "12345678-"
+            target_dir = task_dir_path.parent / original_name
+            
+            try:
+                shutil.move(str(task_dir), str(target_dir))
+                print(f"    Renamed {task_name} back to {original_name}")
+                moved_count += 1
+            except Exception as e:
+                print(f"    Error renaming {task_dir}: {e}")
+    
+    print(f"Processed {moved_count} tasks")
+
+
 def main():
     """Main function."""
-    if len(sys.argv) < 2:
-        print("Usage: python hash_reorganize.py <model_path> [--execute]")
-        print("Add --execute to perform reorganization (default is dry run)")
-        print("Note: Run in 'tbench' conda environment")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Reorganize benchmark results by task description hash.",
+        epilog="Note: Run this script in the 'tbench' conda environment: conda activate tbench"
+    )
     
-    base_path = sys.argv[1]
-    dry_run = '--execute' not in sys.argv
+    parser.add_argument(
+        'model_path',
+        help='Path to the model results directory (e.g., runs/sample-claude-3-5-haiku)'
+    )
     
-    if dry_run:
-        print("DRY RUN MODE: Use --execute to make changes")
+    parser.add_argument(
+        '--reverse',
+        action='store_true',
+        help='Reverse the reorganization by moving task directories back to base level'
+    )
     
-    reorganize_directories(base_path, dry_run=dry_run)
+    args = parser.parse_args()
+    
+    base_path = args.model_path
+    reverse = args.reverse
+    
+    if reverse:
+        reverse_reorganize_directories(base_path)
+    else:
+        reorganize_directories(base_path)
 
 
 if __name__ == "__main__":

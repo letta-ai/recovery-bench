@@ -1,8 +1,7 @@
 from pathlib import Path
 import os
 import json
-import hashlib
-import ast
+import shutil
 
 # or AbstractInstalledAgent if your agent is accessible as a package
 
@@ -11,9 +10,13 @@ from terminal_bench.agents.terminus import Terminus, Command, CommandBatchRespon
 from terminal_bench.llms.chat import Chat
 from terminal_bench.agents.failure_mode import FailureMode
 from terminal_bench.agents.base_agent import AgentResult
-
+from .utils import create_task_hash
 
 class ReplayAgent(Terminus):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 
     @staticmethod
     def name() -> str:
@@ -25,19 +28,19 @@ class ReplayAgent(Terminus):
         session: TmuxSession,
         logging_dir: Path | None = None,
     ) -> AgentResult:
-        print(instruction)
-        print("HERE!!!!")
-        commands, messages = self._read_trajectories(instruction)
+
+        commands, messages = self._read_trajectories(instruction, logging_dir)
 
         # Replay commands
-        self._replay_tasks(session, commands)
+        last_pane_output = self._replay_tasks(session, commands)
 
         # Create fresh chat and run agent loop
         chat = Chat(self._llm)
         chat._messages = messages
-        initial_prompt = session.capture_pane() + "\n\n" + \
+        initial_prompt = last_pane_output + "\n\n" + \
             "Previous attempts failed! Please try again with different approaches."
-        print(commands, messages)
+        # print(initial_prompt)
+        # print(commands, messages)
 
         self._run_agent_loop(initial_prompt, session, chat, logging_dir)
 
@@ -59,10 +62,10 @@ class ReplayAgent(Terminus):
                 pass
         return None
 
-    def _read_trajectories(self, task_description: str) -> tuple[list[Command], list[dict]]:
+    def _read_trajectories(self, task_description: str, logging_dir: Path | None = None) -> tuple[list[list[Command]], list[dict]]:
         """Read commands from all episode response.json files and messages from last episode."""
         base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
-        task_hash = hashlib.sha256(task_description.encode('utf-8')).hexdigest()[:8]
+        task_hash = create_task_hash(task_description)
         
         # Find the trajectory folder - it's nested: hash/task_name/task_name.1-of-1/
         trajectory_base = Path(base_folder) / task_hash
@@ -98,7 +101,14 @@ class ReplayAgent(Terminus):
                     episode_dirs.append((episode_num, item))
                 except ValueError:
                     continue
-        
+
+        if logging_dir is not None:
+            # copy all the files in the agent-logs directory to the logging_dir, including the subdirectories
+            shutil.copytree(agent_logs_dir, logging_dir / "agent-logs")
+
+            # create a file indicting how many episodes have been replayed
+            (logging_dir / "episodes_replayed.txt").write_text(f"replayed {len(episode_dirs)} episodes from {agent_logs_dir}")
+
         # Sort by episode number
         episode_dirs.sort(key=lambda x: x[0])
         
@@ -106,40 +116,60 @@ class ReplayAgent(Terminus):
         for episode_num, episode_dir in episode_dirs:
             parsed_response = self._read_episode_response(episode_dir)
             if parsed_response:
-                commands.extend(parsed_response.commands)
+                commands.append(parsed_response.commands)
         
-        # Read messages from the last episode's debug.json and response.json
-        if episode_dirs:
-            last_episode_dir = episode_dirs[-1][1]
-            
-            # Read conversation history from debug.json
-            debug_file = last_episode_dir / "debug.json"
-            if debug_file.exists():
-                try:
-                    with open(debug_file, 'r') as f:
-                        debug_data = json.load(f)
-                    if "input" in debug_data and isinstance(debug_data["input"], list):
-                        messages = debug_data["input"]
-                except Exception:
-                    pass
-            
-            # Add the last assistant response using helper method
-            parsed_response = self._read_episode_response(last_episode_dir)
-            parsed_response.is_task_complete = False
-            if parsed_response:
-                assistant_message = {
-                    "role": "assistant", 
-                    "content": parsed_response.model_dump_json()
-                }
-                messages.append(assistant_message)
+        last_episode_dir = episode_dirs[-1][1]
+        
+        debug_file = last_episode_dir / "debug.json"
+        if debug_file.exists():
+            try:
+                with open(debug_file, 'r') as f:
+                    debug_data = json.load(f)
+                if "input" in debug_data and isinstance(debug_data["input"], list):
+                    messages = debug_data["input"]
+            except Exception:
+                pass
+        
+        # Add the last assistant response using helper method
+        parsed_response = self._read_episode_response(last_episode_dir)
+        parsed_response.is_task_complete = False
+        if parsed_response:
+            assistant_message = {
+                "role": "assistant", 
+                "content": parsed_response.model_dump_json()
+            }
+            messages.append(assistant_message)
         
         return commands, messages
 
-    def _replay_tasks(self, session: TmuxSession, commands: list[Command]) -> None:
+    def _replay_tasks(self, session: TmuxSession, commands: list[list[Command]]) -> None:
         """Send commands sequentially to session."""
-        for command in commands:
-            session.send_keys(
-                command.keystrokes,
-                block=command.is_blocking,
-                max_timeout_sec=command.timeout_sec,
+        for command_list in commands:
+            _, result = self._execute_commands(command_list, session)
+        return result
+    
+    def _run_agent_loop(
+        self,
+        initial_prompt: str,
+        session: TmuxSession,
+        chat: Chat,
+        n_episodes: int,
+        logging_dir: Path | None = None,
+    ) -> None:
+        """n_episodes is the starting episode number (episode so far)"""
+        prompt = initial_prompt
+
+        for episode in range(n_episodes, n_episodes + self._max_episodes):
+            logging_paths = self._setup_episode_logging(logging_dir, episode)
+
+            parsed_response = self._handle_llm_interaction(chat, prompt, logging_paths)
+            self._record_asciinema_marker(parsed_response.model_dump_json(), session)
+
+            timeout_occurred, terminal_output = self._execute_commands(
+                parsed_response.commands, session
             )
+
+            if parsed_response.is_task_complete:
+                break
+
+            prompt = terminal_output
