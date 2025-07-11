@@ -84,6 +84,24 @@ def find_hash_directories(base_path: str) -> Dict[str, list]:
     return hash_dirs
 
 
+def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
+    """Check if directory is already hash-prefixed by inspecting subdirectory structure."""
+    # Check if name looks like hash prefix (8 hex chars + dash)
+    if len(task_name) > 9 and task_name[8] == '-':
+        hash_part = task_name[:8]
+        if all(c in '0123456789abcdef' for c in hash_part.lower()):
+            # Extract the part after the dash
+            name_after_dash = task_name[9:]
+            
+            # Look for subdirectory that starts with the name after dash
+            task_path = Path(task_dir)
+            for subitem in task_path.iterdir():
+                if subitem.is_dir() and subitem.name.startswith(name_after_dash + '.'):
+                    return True
+    
+    return False
+
+
 def reorganize_directories(base_path: str) -> None:
     """Reorganize directories by adding task hash prefix."""
     print(f"Reorganizing {base_path}")
@@ -97,6 +115,11 @@ def reorganize_directories(base_path: str) -> None:
     
     # Process task descriptions
     for task_dir, task_name in task_dirs.items():
+        # Check if directory already has hash prefix by inspecting subdirectory structure
+        if is_hash_prefixed_directory(task_dir, task_name):
+            print(f"  {task_name} -> SKIPPED (already has hash prefix)")
+            continue
+        
         task_description = extract_task_description(task_name)
         if task_description:
             task_hash = create_task_hash(task_description)
