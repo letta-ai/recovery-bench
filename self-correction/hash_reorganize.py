@@ -19,10 +19,16 @@ from .utils import create_task_hash
 from terminal_bench.handlers.trial_handler import Task
 
 
-def extract_task_description(task_name: str) -> Optional[str]:
+def extract_task_description(task_name: str, task_folder: str = None) -> Optional[str]:
     """Extract task description from terminal-bench task.yaml file."""
     try:
-        task_path = Path(os.getenv("TASK_FOLDER")) / task_name / 'task.yaml'
+        # Use task_folder argument first, then fall back to environment variable
+        folder = task_folder if task_folder is not None else os.getenv("TASK_FOLDER")
+        if folder is None:
+            print(f"Warning: No task folder specified for {task_name}")
+            return None
+        
+        task_path = Path(folder) / task_name / 'task.yaml'
         if not task_path.exists():
             print(f"Warning: Task file not found for {task_name}")
             return None
@@ -102,7 +108,7 @@ def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
     return False
 
 
-def reorganize_directories(base_path: str) -> None:
+def reorganize_directories(base_path: str, task_folder: str = None) -> None:
     """Reorganize directories by adding task hash prefix."""
     print(f"Reorganizing {base_path}")
     
@@ -120,7 +126,7 @@ def reorganize_directories(base_path: str) -> None:
             print(f"  {task_name} -> SKIPPED (already has hash prefix)")
             continue
         
-        task_description = extract_task_description(task_name)
+        task_description = extract_task_description(task_name, task_folder)
         if task_description:
             task_hash = create_task_hash(task_description)
             task_to_hash[task_dir] = task_hash
@@ -192,15 +198,23 @@ def main():
         help='Reverse the reorganization by moving task directories back to base level'
     )
     
+    parser.add_argument(
+        '--task-folder',
+        type=str,
+        default=None,
+        help='Path to the task folder (defaults to TASK_FOLDER environment variable)'
+    )
+    
     args = parser.parse_args()
     
     base_path = args.model_path
     reverse = args.reverse
+    task_folder = args.task_folder
     
     if reverse:
         reverse_reorganize_directories(base_path)
     else:
-        reorganize_directories(base_path)
+        reorganize_directories(base_path, task_folder)
 
 
 if __name__ == "__main__":

@@ -7,8 +7,11 @@ import argparse
 
 from .utils import create_task_hash
 
-def get_unsolved_tasks(logs_dir: Path, max_episodes_desired: int = None, print_output: bool = False) -> list[str]:
+def get_unsolved_tasks(logs_dir: str, max_episodes_desired: int = None, print_output: bool = False) -> list[str]:
     # max_eposides are used internally for registering tasks that are not solved but do not need additional episodes
+    
+    # Ensure logs_dir is a Path object
+    logs_dir = Path(logs_dir)
 
     unsolved_ids = []
 

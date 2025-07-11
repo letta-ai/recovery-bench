@@ -47,7 +47,8 @@ def run_replay_agent(
         "--dataset-version", dataset_version,
         "--agent-import-path", agent_import_path,
         "--model-name", model_name,
-        "--n-concurrent", str(n_concurrent)
+        "--n-concurrent", str(n_concurrent),
+        "--global-timeout-multiplier", "2.0", # because we are replaying, we need to give it more time
     ]
     
     # Add run ID if provided
@@ -97,6 +98,8 @@ def main():
                         help="Import path for the agent")
     parser.add_argument("--n-concurrent", type=int, default=1,
                         help="Number of concurrent processes")
+    parser.add_argument("--task-folder", type=str, default=None,
+                        help="Path to the task folder for reorganization (defaults to trajectory folder)")
     
     args, unknown_args = parser.parse_known_args()
     
@@ -109,7 +112,9 @@ def main():
     print(f"Getting unsolved task IDs from {args.trajectory_folder}...")
     task_ids = get_unsolved_tasks(args.trajectory_folder)
 
-    reorganize_directories(args.trajectory_folder)
+    # Use task_folder if provided, otherwise use None to rely on environment variable
+    task_folder = args.task_folder if args.task_folder else None
+    reorganize_directories(args.trajectory_folder, task_folder)
     
     if not task_ids:
         print("No unsolved task IDs found")

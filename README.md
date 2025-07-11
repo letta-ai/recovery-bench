@@ -5,8 +5,9 @@
 - [x] Add a way to run a single task with customized agent
 - [x] collect traces from the agent
 - [x] add a way to replay the traces with docker 
-- [ ] replay bootstrapped traces to lengthen the traces
-- [ ] registry the traces inside registry.json
+- [x] replay bootstrapped traces to lengthen the traces
+- [ ] add script to one click generate/collect traces
+
 
 # Generate the initial traces
 
@@ -74,7 +75,12 @@ python3 -m self-correction.collect_traces --logs-dirs runs/sample-claude-3-5-hai
 
 To run the collected traces:
 ```
-python3 -m self-correction.run_replay_agent --trajectory-folder runs/self-claude-3-5-collected --model-name anthropic/claude-sonnet-4-20250514 --run-id sonnet-4-correction-1
+python3 -m self-correction.run_replay_agent \
+    --trajectory-folder runs/self-claude-3-5-collected \
+    --model-name anthropic/claude-sonnet-4-20250514 \
+    --run-id sonnet-4-correction-1 \
+    --n-concurrent 4 \
+    --task-folder /home/kevinlin/terminal-bench/tasks
 ```
 
 
@@ -104,7 +110,8 @@ python3 -m self-correction.run_replay_agent \
     --trajectory-folder runs/self-claude-3-5-collected \
     --model-name anthropic/claude-sonnet-4-20250514 \
     --run-id sonnet-4-correction-1 \
-    --n-concurrent 4
+    --n-concurrent 4 \
+    --task-folder /home/kevinlin/terminal-bench/tasks
 ```
 
 This will automatically get all unsolved task IDs from the trajectory folder and run the replay agent for them.
@@ -134,5 +141,6 @@ python3 -m self-correction.run_replay_agent \
     --trajectory-folder runs/self-claude-3-5-collected \
     --model-name anthropic/claude-sonnet-4-20250514 \
     --run-id sonnet-4-correction-1 \
-    --n-concurrent 4
+    --n-concurrent 4 \
+    --task-folder /home/kevinlin/terminal-bench/tasks
 ```

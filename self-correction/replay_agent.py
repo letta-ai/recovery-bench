@@ -42,7 +42,7 @@ class ReplayAgent(Terminus):
         #     print(message)
 
         if len(commands) == 0:
-            raise Exception(f"No commands found for task: {instruction}")
+            raise Exception(f"No commands found for task")
 
         last_pane_output = self._replay_tasks(session, commands)
 
