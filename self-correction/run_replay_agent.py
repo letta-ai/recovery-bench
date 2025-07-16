@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List
 
 from .register_unsolved_tasks import get_unsolved_tasks
-from .hash_reorganize import reorganize_directories
+from .hash_reorganize import reorganize_directories, reverse_reorganize_directories
 
 def run_replay_agent(
     trajectory_folder: str,
@@ -19,6 +19,7 @@ def run_replay_agent(
     dataset_version: str = "head",
     agent_import_path: str = "self-correction.replay_agent:ReplayAgent",
     n_concurrent: int = 1,
+    global_timeout_multiplier: float = 2.0,
     additional_args: List[str] = None
 ):
     """
@@ -48,7 +49,7 @@ def run_replay_agent(
         "--agent-import-path", agent_import_path,
         "--model-name", model_name,
         "--n-concurrent", str(n_concurrent),
-        "--global-timeout-multiplier", "2.0", # because we are replaying, we need to give it more time
+        "--global-timeout-multiplier", str(global_timeout_multiplier), # because we are replaying, we need to give it more time
     ]
     
     # Add run ID if provided
@@ -62,6 +63,8 @@ def run_replay_agent(
     # Add additional arguments if provided
     if additional_args:
         cmd.extend(additional_args)
+
+    cmd.extend(["--cleanup"])
     
     print(f"Running command: {' '.join(cmd)}")
     print(f"Environment TRAJECTORY_FOLDER: {trajectory_folder}")
@@ -114,6 +117,7 @@ def main():
 
     # Use task_folder if provided, otherwise use None to rely on environment variable
     task_folder = args.task_folder if args.task_folder else None
+    reverse_reorganize_directories(args.trajectory_folder)
     reorganize_directories(args.trajectory_folder, task_folder)
     
     if not task_ids:

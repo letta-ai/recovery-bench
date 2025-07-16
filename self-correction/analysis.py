@@ -34,10 +34,12 @@ def extract_task_ids_from_experiment(experiment_folder):
     """Extract task_ids from experiment folder directory names."""
     task_ids = []
     for item in experiment_folder.iterdir():
-        if item.is_dir() and '-' in item.name:
-            # Extract task_id from "hash-task_name" format
-            task_id = '-'.join(item.name.split('-')[1:])
-            task_ids.append(task_id)
+        if item.is_dir():
+            for subitem in item.iterdir():
+                if subitem.is_dir() and (subitem / "results.json").exists():
+                    with open(subitem / "results.json", "r") as f:
+                        result = json.load(f)
+                    task_ids.append(result["task_id"])
     return sorted(task_ids)
 
 
@@ -47,13 +49,16 @@ def analyze_experiment(experiment_folder):
     
     # Read results.json to get resolved status
     results_file = experiment_base / "results.json"
-    if not results_file.exists():
-        raise FileNotFoundError(f"results.json not found in {experiment_base}")
+    resolved_ids = set()
     
-    with open(results_file, 'r') as f:
-        results = json.load(f)
-    
-    resolved_ids = set(results.get("resolved_ids", []))
+    if results_file.exists():
+        # Use main results.json if it exists
+        with open(results_file, 'r') as f:
+            results = json.load(f)
+        resolved_ids = set(results.get("resolved_ids", []))
+    else:
+        # Fallback: read individual result.json files from each task directory
+        print("Main results.json not found, reading individual task results...")
     
     # Extract task_ids from directory structure
     task_ids = extract_task_ids_from_experiment(experiment_base)
@@ -64,7 +69,7 @@ def analyze_experiment(experiment_folder):
         # Find task directory (hash-task_name format)
         task_dir = None
         for item in experiment_base.iterdir():
-            if item.is_dir() and item.name.endswith(f"-{task_id}"):
+            if item.is_dir() and item.name.endswith(f"{task_id}"):
                 task_dir = item
                 break
         
@@ -80,6 +85,20 @@ def analyze_experiment(experiment_folder):
         
         if not execution_dir:
             continue
+            
+        # If we didn't have a main results.json, read individual result.json
+        if not results_file.exists():
+            individual_results_file = execution_dir / "result.json"
+            if individual_results_file.exists():
+                try:
+                    with open(individual_results_file, 'r') as f:
+                        individual_result = json.load(f)
+                    # Check if this task is resolved based on individual result
+                    if individual_result.get("resolved", False):
+                        resolved_ids.add(task_id)
+                except (json.JSONDecodeError, KeyError):
+                    # If we can't read the individual result, assume unresolved
+                    pass
             
         agent_logs_dir = execution_dir / "agent-logs"
         
@@ -131,7 +150,11 @@ def main():
         # Print summary
         resolved_count = sum(1 for r in experiment_results if r[4] == "resolved")
         total_count = len(experiment_results)
-        print(f"\nSummary: {resolved_count}/{total_count} tasks resolved ({resolved_count/total_count*100:.1f}%)")
+        
+        if total_count == 0:
+            print("\nNo tasks found in experiment folder.")
+        else:
+            print(f"\nSummary: {resolved_count}/{total_count} tasks resolved ({resolved_count/total_count*100:.1f}%)")
         
     except Exception as e:
         print(f"Error analyzing experiment: {e}")

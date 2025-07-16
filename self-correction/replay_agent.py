@@ -110,7 +110,7 @@ class ReplayAgent(Terminus):
         task_hash = create_task_hash(task_description)
         
         trajectory_folder = self._find_trajectory_folder(task_hash)
-        
+
         if trajectory_folder is None:
             return [], [], 0
         
