@@ -28,6 +28,7 @@ from .register_unsolved_tasks import get_unsolved_tasks
 from .collect_traces import collect_traces
 from .run_replay_agent import run_replay_agent
 from .hash_reorganize import reorganize_directories
+from .utils import cleanup_docker
 
 
 def run_command(cmd: List[str], env: dict = None, cwd: str = None):
@@ -46,6 +47,9 @@ def run_command(cmd: List[str], env: dict = None, cwd: str = None):
 def generate_initial_traces(model_name: str, run_id: str) -> str:
     """Generate initial traces using tb run."""
     print(f"Generating initial traces for {model_name}...")
+    
+    # Clean up Docker before running tb
+    cleanup_docker()
     
     cmd = [
         "tb", "run",
@@ -118,7 +122,9 @@ def main():
     parser.add_argument("--max-iterations", type=int, default=3, 
                        help="Maximum number of replay iterations")
     parser.add_argument("--min-episodes", type=int, default=10, 
-                       help="Minimum episodes for collection")
+                       help="Minimum episodes for collection")    # If you just want to run initial traces, set this to True
+    parser.add_argument("--run-initial", action="store_true", default=False, 
+                       help="Just run initial traces")
     
     args = parser.parse_args()
     
@@ -129,6 +135,10 @@ def main():
     # Step 1: Generate initial traces
     initial_run_id = f"initial-{model_short}-{timestamp}"
     initial_traces_dir = generate_initial_traces(args.model_name, initial_run_id)
+
+    if args.run_initial:
+        print(f"Just running initial traces for {args.model_name}")
+        return
     
     # Step 2: Hash reorganize initial traces
     print(f"Reorganizing traces in {initial_traces_dir}...")

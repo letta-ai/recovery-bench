@@ -9,6 +9,7 @@ from typing import List
 
 from .register_unsolved_tasks import get_unsolved_tasks
 from .hash_reorganize import reorganize_directories, reverse_reorganize_directories
+from .utils import cleanup_docker
 
 def run_replay_agent(
     trajectory_folder: str,
@@ -36,6 +37,9 @@ def run_replay_agent(
         n_concurrent: Number of concurrent processes
         additional_args: Additional arguments to pass to tb run
     """
+    
+    # Clean up Docker before running tb
+    cleanup_docker()
     
     # Set environment variable
     env = os.environ.copy()
