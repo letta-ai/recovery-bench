@@ -172,7 +172,9 @@ class ReplayAgent(Terminus):
         
         # Add the last assistant response using helper method
         parsed_response = self._read_episode_response(last_episode_dir)
-        parsed_response.is_task_complete = False
+        if parsed_response:
+            parsed_response.is_task_complete = False
+
         if parsed_response:
             assistant_message = {
                 "role": "assistant", 
@@ -184,7 +186,7 @@ class ReplayAgent(Terminus):
         
         return commands, messages, len(episode_dirs)
 
-    def _replay_tasks(self, session: TmuxSession, commands: list[list[Command]]) -> None:
+    def _replay_tasks(self, session: TmuxSession, commands: list[list[Command]]) -> str:
         """Send commands sequentially to session."""
         for command_list in commands:
             try:

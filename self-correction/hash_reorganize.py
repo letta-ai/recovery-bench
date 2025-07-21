@@ -19,7 +19,7 @@ from .utils import create_task_hash
 from terminal_bench.handlers.trial_handler import Task
 
 
-def extract_task_description(task_name: str, task_folder: str = None) -> Optional[str]:
+def extract_task_description(task_name: str, task_folder: str | None = None) -> str | None:
     """Extract task description from terminal-bench task.yaml file."""
     try:
         # Use task_folder argument first, then fall back to environment variable
@@ -108,7 +108,7 @@ def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
     return False
 
 
-def reorganize_directories(base_path: str, task_folder: str = None) -> None:
+def reorganize_directories(base_path: str, task_folder: str | None = None) -> None:
     """Reorganize directories by adding task hash prefix."""
     print(f"Reorganizing {base_path}")
     

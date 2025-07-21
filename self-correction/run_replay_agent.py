@@ -15,13 +15,13 @@ def run_replay_agent(
     trajectory_folder: str,
     model_name: str,
     task_ids: List[str],
-    run_id: str = None,
+    run_id: str | None = None,
     dataset_name: str = "terminal-bench-core",
     dataset_version: str = "head",
     agent_import_path: str = "self-correction.replay_agent:ReplayAgent",
     n_concurrent: int = 1,
     global_timeout_multiplier: float = 2.0,
-    additional_args: List[str] = None
+    additional_args: List[str] | None = None
 ):
     """
     Run the replay agent for multiple task IDs using tb run command.
