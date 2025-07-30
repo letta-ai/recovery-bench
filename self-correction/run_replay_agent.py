@@ -21,7 +21,8 @@ def run_replay_agent(
     agent_import_path: str = "self-correction.replay_agent:ReplayAgent",
     n_concurrent: int = 1,
     global_timeout_multiplier: float = 2.0,
-    additional_args: List[str] | None = None
+    additional_args: List[str] | None = None,
+    cleanup_container: bool = False
 ):
     """
     Run the replay agent for multiple task IDs using tb run command.
@@ -39,7 +40,8 @@ def run_replay_agent(
     """
     
     # Clean up Docker before running tb
-    cleanup_docker()
+    if cleanup_container:
+        cleanup_docker()
     
     # Set environment variable
     env = os.environ.copy()
@@ -107,7 +109,8 @@ def main():
                         help="Number of concurrent processes")
     parser.add_argument("--task-folder", type=str, default=None,
                         help="Path to the task folder for reorganization (defaults to trajectory folder)")
-    
+    parser.add_argument("--cleanup-container", action="store_true", default=False,
+                        help="Cleanup container before running")
     args, unknown_args = parser.parse_known_args()
     
     trajectory_path = Path(args.trajectory_folder)
@@ -141,7 +144,8 @@ def main():
         dataset_version=args.dataset_version,
         agent_import_path=args.agent_import_path,
         n_concurrent=args.n_concurrent,
-        additional_args=unknown_args
+        additional_args=unknown_args,
+        cleanup_container=args.cleanup_container
     )
 
 if __name__ == "__main__":

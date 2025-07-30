@@ -20,6 +20,7 @@ class ReplayAgent(Terminus):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
+        self._include_messages = True
 
 
     @staticmethod
@@ -33,13 +34,9 @@ class ReplayAgent(Terminus):
         logging_dir: Path | None = None,
     ) -> AgentResult:
 
-        # TODO this solves 3Error running agent for task grid-pattern-transform: could not convert string to float: "Error: File '/logs/agent.cast' does not exist.\n"
+        # TODO this solves Error running agent for task grid-pattern-transform: could not convert string to float: "Error: File '/logs/agent.cast' does not exist.\n"
         session._disable_recording = True
         commands, messages, n_episodes = self._read_trajectories(instruction, logging_dir)
-        # print(commands, messages, n_episodes)
-
-        # for message in messages:
-        #     print(message)
 
         if len(commands) == 0:
             raise Exception(f"No commands found for task")
@@ -48,7 +45,8 @@ class ReplayAgent(Terminus):
 
         # Create fresh chat and run agent loop
         chat = Chat(self._llm)
-        chat._messages = messages
+        if self._include_messages:
+            chat._messages = messages
         initial_prompt = last_pane_output + "\n\n" + \
             "Previous attempts failed! Please try again with different approaches."
         
@@ -236,3 +234,12 @@ class ReplayAgent(Terminus):
             else:
                 new_messages.append(message)
         return new_messages
+    
+class ReplayAgentWithoutMessages(ReplayAgent):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._include_messages = False
+    
+    @staticmethod
+    def name() -> str:
+        return "replay-agent-without-messages"
