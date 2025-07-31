@@ -12,8 +12,6 @@ from terminal_bench.agents.failure_mode import FailureMode
 from terminal_bench.agents.base_agent import AgentResult
 from .utils import create_task_hash
 
-import litellm
-# litellm._turn_on_debug()
 
 class ReplayAgent(Terminus):
 
@@ -21,7 +19,6 @@ class ReplayAgent(Terminus):
         super().__init__(**kwargs)
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
-
 
     @staticmethod
     def name() -> str:
@@ -36,7 +33,9 @@ class ReplayAgent(Terminus):
 
         # TODO this solves Error running agent for task grid-pattern-transform: could not convert string to float: "Error: File '/logs/agent.cast' does not exist.\n"
         session._disable_recording = True
-        commands, messages, n_episodes = self._read_trajectories(instruction, logging_dir)
+        commands, messages, n_episodes = self._read_trajectories(
+            instruction, logging_dir
+        )
 
         if len(commands) == 0:
             raise Exception(f"No commands found for task")
@@ -47,9 +46,23 @@ class ReplayAgent(Terminus):
         chat = Chat(self._llm)
         if self._include_messages:
             chat._messages = messages
-        initial_prompt = last_pane_output + "\n\n" + \
-            "Previous attempts failed! Please try again with different approaches."
-        
+            initial_prompt = (
+                last_pane_output
+                + "\n\n"
+                + "Previous attempts failed! Please try again with different approaches."
+            )
+        else:
+            initial_prompt = (
+                self._prompt_template.format(
+                    response_schema=self._response_schema,
+                    instruction=instruction,
+                    history="",
+                    terminal_state=last_pane_output,
+                )
+                + "\n\n"
+                + "Previous attempts failed! Please try again with different approaches."
+            )
+
         # copy session logs if not already copied
         # trajectory_folder = self._find_trajectory_folder(create_task_hash(instruction))
         # if not (logging_dir / "sessions").exists():
@@ -77,19 +90,19 @@ class ReplayAgent(Terminus):
 
     def _find_trajectory_folder(self, task_hash: str) -> Path | None:
         """Find the trajectory folder based on task hash.
-        
+
         The structure is nested: hash-task_name/task_name.1-of-1/
         We don't know the task_name, so we find the one that matches the task_hash.
         """
         base_path = Path(self._base_folder)
         trajectory_base = None
-        
+
         # Find directory that starts with task_hash-
         for item in base_path.iterdir():
             if item.is_dir() and item.name.startswith(f"{task_hash}-"):
                 trajectory_base = item
                 break
-        
+
         if trajectory_base is None:
             return None
 
@@ -100,25 +113,27 @@ class ReplayAgent(Terminus):
                 if "1-of-1" in subdir.name:
                     trajectory_folder = subdir
                     break
-        
+
         return trajectory_folder
 
-    def _read_trajectories(self, task_description: str, logging_dir: Path | None = None) -> tuple[list[list[Command]], list[dict], int]:
+    def _read_trajectories(
+        self, task_description: str, logging_dir: Path | None = None
+    ) -> tuple[list[list[Command]], list[dict], int]:
         """Read commands from all episode response.json files and messages from last episode."""
         task_hash = create_task_hash(task_description)
-        
+
         trajectory_folder = self._find_trajectory_folder(task_hash)
 
         if trajectory_folder is None:
             return [], [], 0
-        
+
         agent_logs_dir = trajectory_folder / "agent-logs"
         if not agent_logs_dir.exists():
             return [], [], 0
-        
+
         commands = []
         messages = []
-        
+
         # Find all episode directories and sort them numerically
         episode_dirs = []
         for item in agent_logs_dir.iterdir():
@@ -133,7 +148,7 @@ class ReplayAgent(Terminus):
             # copy the contents of agent-logs directory directly to logging_dir
             # Create target directory
             logging_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Copy each item from source to target
             for item in agent_logs_dir.iterdir():
                 target_path = logging_dir / item.name
@@ -145,29 +160,31 @@ class ReplayAgent(Terminus):
                     shutil.copy2(item, target_path)
 
             # create a file indicting how many episodes have been replayed
-            (logging_dir / "episodes_replayed.txt").write_text(f"replayed {len(episode_dirs)} episodes from {agent_logs_dir}")
+            (logging_dir / "episodes_replayed.txt").write_text(
+                f"replayed {len(episode_dirs)} episodes from {agent_logs_dir}"
+            )
 
         # Sort by episode number
         episode_dirs.sort(key=lambda x: x[0])
-        
+
         # Read commands from each episode's response.json using helper method
         for episode_num, episode_dir in episode_dirs:
             parsed_response = self._read_episode_response(episode_dir)
             if parsed_response:
                 commands.append(parsed_response.commands)
-        
+
         last_episode_dir = episode_dirs[-1][1]
-        
+
         debug_file = last_episode_dir / "debug.json"
         if debug_file.exists():
             try:
-                with open(debug_file, 'r') as f:
+                with open(debug_file, "r") as f:
                     debug_data = json.load(f)
                 if "input" in debug_data and isinstance(debug_data["input"], list):
                     messages = debug_data["input"]
             except Exception:
                 pass
-        
+
         # Add the last assistant response using helper method
         parsed_response = self._read_episode_response(last_episode_dir)
         if parsed_response:
@@ -175,13 +192,13 @@ class ReplayAgent(Terminus):
 
         if parsed_response:
             assistant_message = {
-                "role": "assistant", 
-                "content": parsed_response.model_dump_json()
+                "role": "assistant",
+                "content": parsed_response.model_dump_json(),
             }
             messages.append(assistant_message)
-        
+
         messages = self._clean_debug_messages(messages)
-        
+
         return commands, messages, len(episode_dirs)
 
     def _replay_tasks(self, session: TmuxSession, commands: list[list[Command]]) -> str:
@@ -195,7 +212,7 @@ class ReplayAgent(Terminus):
                 print(f"Session: {session}")
                 raise e
         return result
-    
+
     def _run_agent_loop(
         self,
         initial_prompt: str,
@@ -227,19 +244,19 @@ class ReplayAgent(Terminus):
         new_messages = []
         for message in messages:
             if isinstance(message["content"], list):
-                new_messages.append({
-                    "role": message["role"],
-                    "content": message["content"][0]["text"]
-                })
+                new_messages.append(
+                    {"role": message["role"], "content": message["content"][0]["text"]}
+                )
             else:
                 new_messages.append(message)
         return new_messages
-    
+
+
 class ReplayAgentWithoutMessages(ReplayAgent):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._include_messages = False
-    
+
     @staticmethod
     def name() -> str:
         return "replay-agent-without-messages"

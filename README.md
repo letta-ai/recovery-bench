@@ -1,146 +1,202 @@
-# self-correction-bench
+# Self-Correction Bench
 
-# TODOs:
-- [x] Add a way to run a single task
-- [x] Add a way to run a single task with customized agent
-- [x] collect traces from the agent
-- [x] add a way to replay the traces with docker 
-- [x] replay bootstrapped traces to lengthen the traces
-- [ ] add script to one click generate/collect traces
+A benchmarking framework for evaluating self-correction capabilities of language models. This repository provides tools to generate self-correction traces and run replay/recovery agents on terminal-based tasks.
 
+## Quick Start
 
-# Generate the initial traces
+The repository provides two main functionalities through Python module commands:
 
-```
- time tb run \
-    --dataset-name terminal-bench-core \
-    --dataset-version head \
-    --agent terminus \
-    --model-name anthropic/claude-3-5-haiku-20241022 \
-    --run-id sample-claude-3-5-haiku --n-concurrent 6
+### 1. Generate Self-Correction Traces
+```bash
+python3 -m self-correction.generate_traces anthropic/claude-3-5-haiku-20241022
 ```
 
-# Usage:
-To reorganize the results by task description hash:
-```
-TASK_FOLDER=/home/kevinlin/terminal-bench/tasks python3 -m self-correction.hash_reorganize runs/sample-claude-3-5-haiku
-```
-
-To filter and register the tasks that are not solved:
-```
-python3 -m self-correction.register_unsolved_tasks --logs-dir runs/sample-claude-3-5-haiku --registry-path ./registry.json --max-episodes 10
-```
-
-To regenerate the traces for the unsolved tasks:
-```
- TRAJECTORY_FOLDER=runs/sample-claude-3-5-haiku tb run \
-    --dataset-name self-correction-bench \
-    --dataset-version 0.0.1 \
-    --agent-import-path self-correction.replay_agent:ReplayAgent \
-    --model-name anthropic/claude-3-5-haiku-20241022 \
-    --run-id=self-claude-3-5-fix-1 \
-    --n-concurrent=4 \
-```
-
-To filter again:
-```
-python3 -m self-correction.register_unsolved_tasks --logs-dir runs/self-claude-3-5-fix-1 --max-episodes 10
-```
-
-To reorgnaize the traces by task description hash:
-```
-TASK_FOLDER=/home/kevinlin/terminal-bench/tasks python3 -m self-correction.hash_reorganize runs/self-claude-3-5-fix-1
-```
-
-To generate the traces yet again:
-```
-TRAJECTORY_FOLDER=runs/self-claude-3-5-fix-1 tb run --local-registry-path=./registry.json \
-    --dataset-name self-correction-bench \
-    --dataset-version 0.0.1 \
-    --agent-import-path self-correction.replay_agent:ReplayAgent \
-    --model-name anthropic/claude-3-5-haiku-20241022 \
-    --run-id=self-claude-3-5-fix-2 \
-    --n-concurrent=4 
-```
-
-To reorgnaize the traces by task description hash:
-```
-TASK_FOLDER=/home/kevinlin/terminal-bench/tasks python3 -m self-correction.hash_reorganize runs/self-claude-3-5-fix-2
-```
-
-To collect the traces from multiple trajectories (make sure that all runs are hashed-reorganized):
-```
-python3 -m self-correction.collect_traces --logs-dirs runs/sample-claude-3-5-haiku runs/self-claude-3-5-fix-1 runs/self-claude-3-5-fix-2 --output-dir runs/self-claude-3-5-collected
-```
-
-To run the collected traces:
-```
+### 2. Run Replay/Recovery Agent
+```bash
 python3 -m self-correction.run_replay_agent \
-    --trajectory-folder runs/self-claude-3-5-collected \
-    --model-name anthropic/claude-sonnet-4-20250514 \
-    --run-id sonnet-4-correction-1 \
+    --trajectory-folder runs/collected-traces \
+    --model-name anthropic/claude-sonnet-4-20250514
+```
+
+## Main Components
+
+### Core Functionality
+- **Trace Generation**: Automatically generates initial traces, identifies failed tasks, and creates correction attempts
+- **Replay Agent**: Runs collected traces with a recovery agent to attempt self-correction
+- **Analysis Tools**: Compare results and analyze performance across different models
+
+### File Structure
+```
+self-correction-bench/
+├── self-correction/
+│   ├── generate_traces.py    # Self-correction trace generation pipeline
+│   ├── run_replay_agent.py   # Replay/recovery agent runner
+│   ├── replay_agent.py       # Core replay agent implementation
+│   ├── utils.py              # Consolidated utility functions
+│   ├── analysis.py           # Results analysis tools
+│   └── compare_results.py    # Results comparison tools
+```
+
+## Detailed Usage
+
+### Generate Traces (Full Pipeline)
+
+Generate complete self-correction traces for a model:
+
+```bash
+python3 -m self-correction.generate_traces anthropic/claude-3-5-haiku-20241022 \
+    --dataset-version 0.2.15 \
+    --min-episodes 10 \
     --n-concurrent 4 \
-    --task-folder /home/kevinlin/terminal-bench/tasks
+    --max-iterations 3
 ```
 
+This command will:
+1. Generate initial traces using terminal-bench
+2. Identify unsolved tasks 
+3. Run replay agent iterations to generate more traces that meet the minimum episode threshold (and still failed)
+4. Collect all traces into a final directory
 
-To run the replay agent:
-```
-TRAJECTORY_FOLDER=runs/sample-claude-3-5-haiku tb run --local-registry-path=./registry.json \
-    --dataset-name self-correction-bench \
-    --dataset-version 0.0.1 \
-    --agent-import-path self-correction.replay_agent:ReplayAgent \
-    --model-name anthropic/claude-sonnet-4-20250514 --run-id=...
-```
+#### Options:
+- `--dataset-version`: Dataset version to use for initial trace generation (default: 0.2.15)
+- `--min-episodes`: Minimum episodes per task for filtering and collection (default: 10)
+- `--n-concurrent`: Number of concurrent processes for both initial traces and replay iterations (default: 4)  
+- `--max-iterations`: Maximum replay iterations (default: 3)
+- `--run-initial`: Only run initial traces, skip replay iterations
+- `--task-folder`: Path to task definitions folder
 
-# New Task-Specific Commands
+### Run Replay Agent
 
-## Get List of Unsolved Task IDs
+Run the replay/recovery agent on collected traces:
 
-To get only the list of unsolved task IDs (without creating registry):
-```
-python3 -m self-correction.register_unsolved_tasks --logs-dir runs/self-claude-3-5-fix-1 --max-episodes 10 --list-only
-```
-
-## Run Replay Agent for Unsolved Tasks
-
-To run the replay agent for all unsolved tasks in a trajectory folder:
-```
+```bash
 python3 -m self-correction.run_replay_agent \
-    --trajectory-folder runs/self-claude-3-5-collected \
+    --trajectory-folder runs/collected-traces \
     --model-name anthropic/claude-sonnet-4-20250514 \
-    --run-id sonnet-4-correction-1 \
-    --n-concurrent 4 \
-    --task-folder /home/kevinlin/terminal-bench/tasks
+    --run-id sonnet-correction-1 \
+    --n-concurrent 4
 ```
 
-This will automatically get all unsolved task IDs from the trajectory folder and run the replay agent for them.
+#### Options:
+- `--trajectory-folder`: Path to the trajectory folder (required)
+- `--model-name`: Model name to use (required)
+- `--run-id`: Custom run identifier
+- `--n-concurrent`: Number of concurrent processes
+- `--task-folder`: Path to task definitions
+- `--cleanup-container`: Clean up Docker containers before running
 
-## Run TB Command with Specific Task IDs
+### Direct Function Usage
 
-To run the tb command directly with specific task IDs:
+All functionality is available as Python functions in `utils.py`:
+
+```python
+from self_correction.utils import (
+    get_unsolved_tasks,
+    collect_traces, 
+    reorganize_directories,
+    run_replay_agent_tb
+)
+
+# Get unsolved task IDs
+task_ids = get_unsolved_tasks("runs/my-run", min_episodes_desired=10)
+
+# Collect traces from multiple runs
+collect_traces([Path("runs/run1"), Path("runs/run2")], Path("runs/collected"))
 ```
-TRAJECTORY_FOLDER=runs/self-claude-3-5-collected tb run \
-    --dataset-name terminal-bench-core \
-    --dataset-version head \
-    --agent-import-path self-correction.replay_agent:ReplayAgent \
-    --model-name anthropic/claude-sonnet-4-20250514 \
-    --task-id taskid1 \
-    --task-id taskid2 \
-    --task-id taskid3 \
-    --run-id sonnet-4-correction-1
+
+## Requirements
+
+- Python 3.8+
+- terminal-bench framework
+- Docker (for task execution)
+- Required Python packages (install with `pip install -r requirements.txt`)
+
+## Environment Setup
+
+Set the task folder environment variable:
+```bash
+export TASK_FOLDER=/path/to/terminal-bench/tasks
 ```
 
-## Automatic End-to-End Workflow
+## Examples
 
-To automatically get unsolved task IDs and run the replay agent (integrated into run_replay_agent):
+### Complete Workflow Example
 
+1. **Generate traces for a model:**
+   ```bash
+   python3 -m self-correction.generate_traces anthropic/claude-3-5-haiku-20241022
+   ```
+
+2. **Run correction with a stronger model:**
+   ```bash
+   python3 -m self-correction.run_replay_agent \
+       --trajectory-folder runs/claude-3-5-haiku-collected-20250730_123456 \
+       --model-name anthropic/claude-sonnet-4-20250514
+   ```
+
+3. **Analyze results:**
+   ```bash
+   python3 -m self-correction.analysis --run-dirs runs/initial-run runs/corrected-run
+   ```
+
+### Batch Processing
+
+Generate traces for multiple models:
+```bash
+for model in "anthropic/claude-3-5-haiku-20241022" "anthropic/claude-3-5-sonnet-20241022"; do
+    python3 -m self-correction.generate_traces "$model"
+done
 ```
-# Automatically get unsolved task IDs from trajectory folder and run replay agent
-python3 -m self-correction.run_replay_agent \
-    --trajectory-folder runs/self-claude-3-5-collected \
-    --model-name anthropic/claude-sonnet-4-20250514 \
-    --run-id sonnet-4-correction-1 \
-    --n-concurrent 4 \
-    --task-folder /home/kevinlin/terminal-bench/tasks
+
+### Additional Utility Commands
+
+Get unsolved task IDs:
+```bash
+python3 -c "
+from self_correction.utils import get_unsolved_tasks
+tasks = get_unsolved_tasks('runs/my-run', print_output=True)
+"
 ```
+
+Reorganize directories by task hash:
+```bash
+python3 -c "
+from self_correction.utils import reorganize_directories
+reorganize_directories('runs/my-run', '/path/to/tasks')
+"
+```
+
+Collect traces from multiple directories:
+```bash
+python3 -c "
+from pathlib import Path
+from self_correction.utils import collect_traces
+collect_traces([Path('runs/run1'), Path('runs/run2')], Path('runs/collected'))
+"
+```
+
+## Output Structure
+
+Generated runs are stored in the `runs/` directory with timestamps:
+```
+runs/
+├── initial-claude-3-5-haiku-20250730_123456/     # Initial traces
+├── replay-claude-3-5-haiku-20250730_123456-iter1/ # First replay iteration  
+├── claude-3-5-haiku-collected-20250730_123456/    # Final collected traces
+└── sonnet-4-correction-1/                        # Correction results
+```
+
+## Contributing
+
+1. Follow the existing code structure in `self-correction/`
+2. Add new utilities to `utils.py` as functions
+3. Update this README for any new functionality
+4. Test with multiple models and task types
+
+## Troubleshooting
+
+- **Docker issues**: Use `--cleanup-container` flag to clean up containers
+- **Task folder not found**: Set `TASK_FOLDER` environment variable or use `--task-folder` flag  
+- **Memory issues**: Reduce `--n-concurrent` parameter
+- **Import errors**: Ensure you're running from the repository root directory
+- **Module not found**: Make sure you're using `python3 -m self-correction.module_name` format
