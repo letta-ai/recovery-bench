@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 class ReplayABC(ABC):
     @abstractmethod
     def _replay_environment(
-        self, session: TmuxSession, commands: list[list[Command]]
+        self, session: TmuxSession, commands: list[Command]
     ) -> str:
         pass
 
@@ -29,7 +29,7 @@ class ReplayABC(ABC):
     @abstractmethod
     def _read_trajectories(
         self, task_description: str, logging_dir: Path | None = None
-    ) -> tuple[list[list[Command]], list[dict], int]:
+    ) -> tuple[list[Command], list[dict], int]:
         pass
 
 
@@ -140,7 +140,7 @@ class ReplayAgent(Terminus, ReplayABC):
 
     def _read_trajectories(
         self, task_description: str, logging_dir: Path | None = None
-    ) -> tuple[list[list[Command]], list[dict], int]:
+    ) -> tuple[list[Command], list[dict], int]:
         """Read commands from all episode response.json files and messages from last episode."""
         task_hash = create_task_hash(task_description)
 
@@ -193,7 +193,7 @@ class ReplayAgent(Terminus, ReplayABC):
         for episode_num, episode_dir in episode_dirs:
             parsed_response = self._read_episode_response(episode_dir)
             if parsed_response:
-                commands.append(parsed_response.commands)
+                commands.extend(parsed_response.commands)
 
         last_episode_dir = episode_dirs[-1][1]
 
@@ -224,17 +224,16 @@ class ReplayAgent(Terminus, ReplayABC):
         return commands, messages, len(episode_dirs)
 
     def _replay_environment(
-        self, session: TmuxSession, commands: list[list[Command]]
+        self, session: TmuxSession, commands: list[Command]
     ) -> str:
         """Send commands sequentially to session."""
-        for command_list in commands:
-            try:
-                _, result = self._execute_commands(command_list, session)
-            except Exception as e:
-                print(f"Error executing commands: {e}")
-                print(f"Command list: {command_list}")
-                print(f"Session: {session}")
-                raise e
+        try:
+            _, result = self._execute_commands(commands, session)
+        except Exception as e:
+            print(f"Error executing commands: {e}")
+            print(f"Commands: {commands}")
+            print(f"Session: {session}")
+            raise e
         return result
 
     def _run_agent_loop(
