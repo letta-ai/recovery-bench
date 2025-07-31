@@ -5,15 +5,35 @@ import shutil
 
 # or AbstractInstalledAgent if your agent is accessible as a package
 
+from terminal_bench import BaseAgent
 from terminal_bench.terminal.tmux_session import TmuxSession
 from terminal_bench.agents.terminus import Terminus, Command, CommandBatchResponse
 from terminal_bench.llms.chat import Chat
 from terminal_bench.agents.failure_mode import FailureMode
 from terminal_bench.agents.base_agent import AgentResult
 from .utils import create_task_hash
+from abc import ABC, abstractmethod
 
 
-class ReplayAgent(Terminus):
+class ReplayABC(ABC):
+    @abstractmethod
+    def _replay_environment(
+        self, session: TmuxSession, commands: list[list[Command]]
+    ) -> str:
+        pass
+
+    @abstractmethod
+    def add_messages(self, messages) -> None:
+        pass
+
+    @abstractmethod
+    def _read_trajectories(
+        self, task_description: str, logging_dir: Path | None = None
+    ) -> tuple[list[list[Command]], list[dict], int]:
+        pass
+
+
+class ReplayAgent(Terminus, ReplayABC):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -24,6 +44,12 @@ class ReplayAgent(Terminus):
     def name() -> str:
         return "replay-agent"
 
+    def add_messages(self, messages) -> None:
+        if self._include_messages:
+            self._messages = messages
+        else:
+            self._messages = []
+
     def perform_task(
         self,
         instruction: str,
@@ -31,7 +57,6 @@ class ReplayAgent(Terminus):
         logging_dir: Path | None = None,
     ) -> AgentResult:
 
-        # TODO this solves Error running agent for task grid-pattern-transform: could not convert string to float: "Error: File '/logs/agent.cast' does not exist.\n"
         session._disable_recording = True
         commands, messages, n_episodes = self._read_trajectories(
             instruction, logging_dir
@@ -40,12 +65,14 @@ class ReplayAgent(Terminus):
         if len(commands) == 0:
             raise Exception(f"No commands found for task")
 
-        last_pane_output = self._replay_tasks(session, commands)
+        last_pane_output = self._replay_environment(session, commands)
 
         # Create fresh chat and run agent loop
         chat = Chat(self._llm)
+        self.add_messages(messages)
+        chat._messages = self._messages
+
         if self._include_messages:
-            chat._messages = messages
             initial_prompt = (
                 last_pane_output
                 + "\n\n"
@@ -62,11 +89,6 @@ class ReplayAgent(Terminus):
                 + "\n\n"
                 + "Previous attempts failed! Please try again with different approaches."
             )
-
-        # copy session logs if not already copied
-        # trajectory_folder = self._find_trajectory_folder(create_task_hash(instruction))
-        # if not (logging_dir / "sessions").exists():
-        #     shutil.copytree(trajectory_folder / "sessions", logging_dir / "sessions")
 
         self._run_agent_loop(initial_prompt, session, chat, n_episodes, logging_dir)
 
@@ -201,7 +223,9 @@ class ReplayAgent(Terminus):
 
         return commands, messages, len(episode_dirs)
 
-    def _replay_tasks(self, session: TmuxSession, commands: list[list[Command]]) -> str:
+    def _replay_environment(
+        self, session: TmuxSession, commands: list[list[Command]]
+    ) -> str:
         """Send commands sequentially to session."""
         for command_list in commands:
             try:

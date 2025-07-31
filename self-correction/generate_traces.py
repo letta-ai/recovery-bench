@@ -29,7 +29,9 @@ from .utils import (
 )
 
 
-def generate_initial_traces(model_name: str, run_id: str, dataset_version: str = "0.2.15", n_concurrent: int = 6) -> str:
+def generate_initial_traces(
+    model_name: str, run_id: str, dataset_version: str = "0.2.15", n_concurrent: int = 6
+) -> str:
     """Generate initial traces using tb run."""
     print(f"Generating initial traces for {model_name}...")
 
@@ -102,7 +104,7 @@ def main():
     parser.add_argument("model_name", help="Model name to use for trace generation")
     parser.add_argument(
         "--task-folder",
-        default="/home/kevinlin/terminal-bench/tasks",
+        default="./terminal-bench/tasks",
         help="Path to task folder",
     )
     parser.add_argument(
@@ -115,7 +117,10 @@ def main():
         help="Maximum number of replay iterations",
     )
     parser.add_argument(
-        "--min-episodes", type=int, default=10, help="Minimum episodes for filtering and collection"
+        "--min-episodes",
+        type=int,
+        default=10,
+        help="Minimum episodes for filtering and collection",
     )  # If you just want to run initial traces, set this to True
     parser.add_argument(
         "--run-initial",

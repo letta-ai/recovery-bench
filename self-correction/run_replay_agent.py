@@ -57,8 +57,8 @@ def main():
     parser.add_argument(
         "--task-folder",
         type=str,
-        default=None,
-        help="Path to the task folder for reorganization (defaults to trajectory folder)",
+        default="./terminal-bench/tasks",
+        help="Path to the task folder for reorganization",
     )
     parser.add_argument(
         "--cleanup-container",
