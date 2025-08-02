@@ -43,7 +43,7 @@ def main():
         help="Name of the dataset",
     )
     parser.add_argument(
-        "--dataset-version", type=str, default="head", help="Version of the dataset"
+        "--dataset-version", type=str, default="0.2.15", help="Version of the dataset"
     )
     parser.add_argument(
         "--agent-import-path",

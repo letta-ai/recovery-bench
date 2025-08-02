@@ -23,7 +23,7 @@ class ReplayABC(ABC):
         pass
 
     @abstractmethod
-    def add_messages(self, messages) -> None:
+    def _add_messages(self, messages) -> None:
         pass
 
     @abstractmethod
@@ -44,7 +44,7 @@ class ReplayAgent(Terminus, ReplayABC):
     def name() -> str:
         return "replay-agent"
 
-    def add_messages(self, messages) -> None:
+    def _add_messages(self, messages) -> None:
         if self._include_messages:
             self._messages = messages
         else:
@@ -69,7 +69,7 @@ class ReplayAgent(Terminus, ReplayABC):
 
         # Create fresh chat and run agent loop
         chat = Chat(self._llm)
-        self.add_messages(messages)
+        self._add_messages(messages)
         chat._messages = self._messages
 
         if self._include_messages:
@@ -283,3 +283,19 @@ class ReplayAgentWithoutMessages(ReplayAgent):
     @staticmethod
     def name() -> str:
         return "replay-agent-without-messages"
+
+class ReplayAgentWithMessageSummaries(ReplayAgent):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._include_messages = True
+
+    def _add_messages(self, messages) -> None:
+        # create a summary of the messages and add it to message list
+        chat = Chat(self._llm)
+        chat._messages = messages
+        summary = chat.chat(
+            "Please summarize the all previous interactions with the terminal. "
+            "The summary should be concise and to the point. "
+            "Summary:"
+        )
+        self._messages = [messages[0]] + [{"role": "assistant", "content": summary}]

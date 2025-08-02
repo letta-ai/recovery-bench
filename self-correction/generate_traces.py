@@ -51,6 +51,8 @@ def generate_initial_traces(
         "--n-concurrent",
         str(n_concurrent),
         "--cleanup",
+        "--local-registry-path",
+        "./registry.json",
     ]
 
     run_command(cmd)
