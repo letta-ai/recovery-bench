@@ -66,6 +66,13 @@ def main():
         default=False,
         help="Cleanup container before running",
     )
+    parser.add_argument(
+        "--task-ids",
+        nargs="+",
+        type=str,
+        default=None,
+        help="One or more task IDs to run the replay agent, usually used for debugging",
+    )
     args, unknown_args = parser.parse_known_args()
 
     trajectory_path = Path(args.trajectory_folder)
@@ -75,7 +82,11 @@ def main():
 
     # Get unsolved task IDs from trajectory folder
     print(f"Getting unsolved task IDs from {args.trajectory_folder}...")
-    task_ids = get_unsolved_tasks(args.trajectory_folder)
+    task_ids = (
+        get_unsolved_tasks(args.trajectory_folder)
+        if not args.task_ids
+        else args.task_ids
+    )
 
     # Use task_folder if provided, otherwise use None to rely on environment variable
     task_folder = args.task_folder if args.task_folder else None

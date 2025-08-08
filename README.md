@@ -57,3 +57,6 @@ python3 -m self-correction.run_replay_agent \
 - `--n-concurrent`: Number of concurrent processes
 - `--task-folder`: Path to task definitions folder (default: ./terminal-bench/tasks)
 - `--cleanup-container`: Clean up Docker containers before running
+
+TODO:
+- [ ] Bumping up terminal-bench version
