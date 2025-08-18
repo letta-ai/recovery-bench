@@ -391,7 +391,7 @@ def run_replay_agent_tb(
     run_id: str | None = None,
     dataset_name: str = "terminal-bench-core",
     dataset_version: str = "0.2.15",
-    agent_import_path: str = "self-correction.replay_agent:ReplayAgent",
+    agent_import_path: str = "recovery-bench.replay_agent:ReplayAgent",
     n_concurrent: int = 1,
     global_timeout_multiplier: float = 2.0,
     additional_args: List[str] | None = None,

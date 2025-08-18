@@ -1,17 +1,17 @@
-# Self-Correction Bench
+# Recovery Bench
 
-A benchmarking framework for evaluating self-correction capabilities of language models. This repository provides tools to generate self-correction traces and run replay/recovery agents on terminal-based tasks.
+A benchmarking framework for evaluating recovery-bench capabilities of language models. This repository provides tools to generate recovery-bench traces and run replay/recovery agents on terminal-based tasks.
 
 ## Quick Start
 
-### 1. Generate Self-Correction Traces
+### 1. Generate Recover Bench Traces
 ```bash
-python3 -m self-correction.generate_traces anthropic/claude-3-5-haiku-20241022
+python3 -m recovery-bench.generate_traces openai/gpt-4o-mini
 ```
 
 ### 2. Run Replay/Recovery Agent
 ```bash
-python3 -m self-correction.run_replay_agent \
+python3 -m recovery-bench.run_replay_agent \
     --trajectory-folder runs/collected-traces \
     --model-name anthropic/claude-sonnet-4-20250514
 ```
@@ -20,10 +20,10 @@ python3 -m self-correction.run_replay_agent \
 
 ### Generate Traces
 
-Generate complete self-correction traces for a model:
+Generate complete recovery-bench traces for a model:
 
 ```bash
-python3 -m self-correction.generate_traces anthropic/claude-3-5-haiku-20241022 \
+python3 -m recovery-bench.generate_traces openai/gpt-4o-mini \
     --dataset-version 0.2.15 \
     --min-episodes 10 \
     --n-concurrent 4 \
@@ -43,7 +43,7 @@ Key options:
 Run the replay/recovery agent on collected traces:
 
 ```bash
-python3 -m self-correction.run_replay_agent \
+python3 -m recovery-bench.run_replay_agent \
     --trajectory-folder runs/collected-traces \
     --model-name anthropic/claude-sonnet-4-20250514 \
     --run-id sonnet-correction-1 \

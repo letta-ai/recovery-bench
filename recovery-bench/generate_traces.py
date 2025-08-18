@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate self-correction traces.
+Generate recovery-bench traces.
 
 This script automates the entire trace generation pipeline:
 1. Generate initial traces
@@ -84,7 +84,7 @@ def run_replay_agent_for_unsolved(
         model_name=model_name,
         task_ids=unsolved_task_ids,
         run_id=run_id,
-        agent_import_path="self-correction.replay_agent:ReplayAgent",
+        agent_import_path="recovery-bench.replay_agent:ReplayAgent",
         n_concurrent=n_concurrent,
     )
 

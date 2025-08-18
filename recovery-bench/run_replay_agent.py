@@ -2,7 +2,7 @@
 """
 Run replay/recovery agent.
 
-This script runs the replay agent on collected traces for self-correction.
+This script runs the replay agent on collected traces for recovery-bench.
 
 Usage: python -m self_correction.run_replay_agent --trajectory-folder FOLDER --model-name MODEL
 Example: python -m self_correction.run_replay_agent --trajectory-folder runs/collected --model-name anthropic/claude-sonnet-4-20250514
@@ -48,7 +48,7 @@ def main():
     parser.add_argument(
         "--agent-import-path",
         type=str,
-        default="self-correction.replay_agent:ReplayAgent",
+        default="recovery-bench.replay_agent:ReplayAgent",
         help="Import path for the agent",
     )
     parser.add_argument(
