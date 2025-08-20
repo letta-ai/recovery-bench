@@ -1,0 +1,62 @@
+{
+    "state_analysis": "The terminal is currently at the root of the Docker container '/app' as the root user. No previous commands have been executed yet, so the environment is unconfigured for Git, SSH, or Nginx services.",
+    "explanation": "The following commands will install Git, Nginx, and OpenSSL, configure a Git repository, set up SSH access with password authentication, and create a self-signed SSL certificate for HTTPS. A post-receive hook will also be created to handle deployment for the specified branches.",
+    "commands": [
+        {
+            "keystrokes": "apt-get update\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "apt-get install -y git nginx openssl\n",
+            "is_blocking": true,
+            "timeout_sec": 30
+        },
+        {
+            "keystrokes": "mkdir -p /git/project && cd /git/project && git init --bare\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "echo 'password' | chpasswd\n",
+            "is_blocking": true,
+            "timeout_sec": 5
+        },
+        {
+            "keystrokes": "echo 'Match User git\n    PasswordAuthentication yes\n' >> /etc/ssh/sshd_config\n",
+            "is_blocking": true,
+            "timeout_sec": 5
+        },
+        {
+            "keystrokes": "systemctl restart ssh\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/nginx-selfsigned.key -out /etc/ssl/certs/nginx-selfsigned.crt -subj '/CN=localhost'\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "echo 'server { listen 8443 ssl; server_name localhost; ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt; ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key; location / { root /git/project/main; index index.html; } location /dev/ { root /git/project/dev; index index.html; } }' > /etc/nginx/sites-available/default\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "systemctl restart nginx\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "echo '#!/bin/bash\nGIT_REPO_PATH=/git/project\nTARGET_DIR=$GIT_REPO_PATH/\nBRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)\nif [ \"$BRANCH_NAME\" == \"main\" ]; then\n  cp -r $TARGET_DIR/main/* /var/www/html/;\nelif [ \"$BRANCH_NAME\" == \"dev\" ]; then\n  cp -r $TARGET_DIR/dev/* /var/www/html/dev/;\nfi' > /git/project/hooks/post-receive\n",
+            "is_blocking": true,
+            "timeout_sec": 10
+        },
+        {
+            "keystrokes": "chmod +x /git/project/hooks/post-receive\n",
+            "is_blocking": true,
+            "timeout_sec": 5
+        }
+    ],
+    "is_task_complete": false
+}

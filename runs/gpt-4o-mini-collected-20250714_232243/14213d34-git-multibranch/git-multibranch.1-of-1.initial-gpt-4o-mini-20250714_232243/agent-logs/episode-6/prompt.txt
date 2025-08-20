@@ -1,0 +1,40 @@
+
+include_shell "/usr/share/lighttpd/create-mime.conf.pl"
+include "/etc/lighttpd/conf-enabled/*.conf"
+
+# default listening port for IPv6 is same as default IPv4 port
+include_shell "/usr/share/lighttpd/use-ipv6.pl " + server.port
+
+### Customizations
+# customizations should generally be placed in separate files such as
+#   /etc/lighttpd/conf-available/00_vars.conf    # override variables for *.conf
+#   /etc/lighttpd/conf-available/99_custom.conf  # override *.conf settings
+# and then enabled using lighty-enable-mod (1)
+root@342342dd741a:/git/project# lighttpd -D -f /etc/lighttpd/lighttpd.conf
+2025-07-15 00:18:39: (network.c.588) bind() [::]:80: Address already in use
+root@342342dd741a:/git/project# sed -i 's/server.port = 80/server.port = 8443/' /etc/lighttpd/lighttpd.conf; tmux wait -S done
+root@342342dd741a:/git/project# echo 'server.modules += ( "mod_openssl" )
+> ssl.engine = "enable"
+> ssl.pemfile = "/etc/ssl/certs/nginx-selfsigned.crt"
+> ' >> /etc/lighttpd/lighttpd.conf; tmux wait -S done
+root@342342dd741a:/git/project# lighttpd -D -f /etc/lighttpd/lighttpd.conf
+2025-07-15 00:18:44: (mod_openssl.c.1483) SSL: couldn't read private key from '/etc/ssl/certs/nginx-selfsigned.crt'
+2025-07-15 00:18:44: (server.c.1655) Initialization of plugins failed. Going down.
+root@342342dd741a:/git/project# lsof -i :80; tmux wait -S done
+bash: lsof: command not found
+root@342342dd741a:/git/project# kill $(lsof -t -i:80); tmux wait -S done
+bash: lsof: command not found
+kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]
+root@342342dd741a:/git/project# lighttpd -D -f /etc/lighttpd/lighttpd.conf
+2025-07-15 00:18:49: (mod_openssl.c.1483) SSL: couldn't read private key from '/etc/ssl/certs/nginx-selfsigned.crt'
+2025-07-15 00:18:49: (server.c.1655) Initialization of plugins failed. Going down.
+root@342342dd741a:/git/project# ls -l /etc/ssl/certs/nginx-selfsigned.crt; tmux wait -S done
+-rw-r--r-- 1 root root 1115 Jul 15 00:18 /etc/ssl/certs/nginx-selfsigned.crt
+root@342342dd741a:/git/project# openssl rsa -in /etc/ssl/private/nginx-selfsigned.key -out /etc/ssl/private/nginx-selfsigned.key.new; tmux wait -S done
+writing RSA key
+root@342342dd741a:/git/project# cat /etc/ssl/certs/nginx-selfsigned.crt /etc/ssl/private/nginx-selfsigned.key.new > /etc/ssl/certs/lighttpd-selfsigned.pem; tmux
+ wait -S done
+root@342342dd741a:/git/project# sed -i 's|ssl.pemfile = "/etc/ssl/certs/nginx-selfsigned.crt"|ssl.pemfile = "/etc/ssl/certs/lighttpd-selfsigned.pem"|' /etc/ligh
+ttpd/lighttpd.conf; tmux wait -S done
+root@342342dd741a:/git/project# lighttpd -D -f /etc/lighttpd/lighttpd.conf
+

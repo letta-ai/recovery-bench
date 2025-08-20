@@ -1,0 +1,40 @@
+Downloading grpcio-1.73.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.0/6.0 MB 78.1 MB/s eta 0:00:00
+Downloading grpcio_tools-1.73.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.7/2.7 MB 101.3 MB/s eta 0:00:00
+Downloading protobuf-6.31.1-cp39-abi3-manylinux2014_x86_64.whl (321 kB)
+Downloading setuptools-80.9.0-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 71.0 MB/s eta 0:00:00
+Installing collected packages: setuptools, protobuf, grpcio, grpcio-tools
+Successfully installed grpcio-1.73.0 grpcio-tools-1.73.0 protobuf-6.31.1 setuptools-80.9.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your syst
+em unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you ar
+e doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.3.1 -> 25.1.1
+[notice] To update, run: pip install --upgrade pip
+root@12ca9375e3c1:/app# echo 'syntax = "proto3";\n\nservice KVStore {\n    rpc GetVal(GetValRequest) returns (GetValResponse);\n    rpc SetVal(SetValRequest) re
+turns (SetValResponse);\n}\n\nmessage GetValRequest {\n    string key = 1;\n}\n\nmessage GetValResponse {\n    int value = 1;\n}\n\nmessage SetValRequest {\n
+ string key = 1;\n    int value = 2;\n}\n\nmessage SetValResponse {\n    int value = 1;\n}' > kv-store.proto; tmux wait -S done
+root@12ca9375e3c1:/app# python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. kv-store.proto; tmux wait -S done
+kv-store.proto:1:19: Expected top-level statement (e.g. "message").
+kv-store.proto:1:157: Expected top-level statement (e.g. "message").
+kv-store.proto:1:208: Expected top-level statement (e.g. "message").
+kv-store.proto:1:259: Expected top-level statement (e.g. "message").
+kv-store.proto:1:330: Expected top-level statement (e.g. "message").
+root@12ca9375e3c1:/app# echo 'import grpc\nfrom concurrent import futures\nimport kv_store_pb2\nimport kv_store_pb2_grpc\n\nclass Server(kv_store_pb2_grpc.KVSto
+reServicer):\n    def __init__(self):\n        self.store = {}\n\n    def GetVal(self, request, context):\n        return kv_store_pb2.GetValResponse(value=self
+.store.get(request.key, 0))\n\n    def SetVal(self, request, context):\n        self.store[request.key] = request.value\n        return kv_store_pb2.SetValRespo
+nse(value=request.value)\n\ndef serve():\n    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))\n    kv_store_pb2_grpc.add_KVStoreServicer_to_ser
+ver(Server(), server)\n    server.add_insecure_port('[::]:5328')\n    server.start()\n    server.wait_for_termination()\n\nif __name__ == '__main__':\n    serve
+()' > server.py; tmux wait -S done
+root@12ca9375e3c1:/app# python server.py
+  File "/app/server.py", line 1
+    import grpc\nfrom concurrent import futures\nimport kv_store_pb2\nimport kv_store_pb2_grpc\n\nclass Server(kv_store_pb2_grpc.KVStoreServicer):\n    def __in
+it__(self):\n        self.store = {}\n\n    def GetVal(self, request, context):\n        return kv_store_pb2.GetValResponse(value=self.store.get(request.key, 0)
+)\n\n    def SetVal(self, request, context):\n        self.store[request.key] = request.value\n        return kv_store_pb2.SetValResponse(value=request.value)\n
+\ndef serve():\n    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))\n    kv_store_pb2_grpc.add_KVStoreServicer_to_server(Server(), server)\n
+ server.add_insecure_port([::]:5328)\n    server.start()\n    server.wait_for_termination()\n\nif __name__ == __main__:\n    serve()
+                ^
+SyntaxError: unexpected character after line continuation character
+root@12ca9375e3c1:/app#
