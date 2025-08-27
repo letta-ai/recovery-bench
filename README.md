@@ -1,6 +1,8 @@
-# Recovery Bench
+# Recovery-Bench
 
-A benchmarking framework for evaluating recovery-bench capabilities of language models. This repository provides tools to generate recovery-bench traces and run replay/recovery agents on terminal-based tasks.
+Recovery-Bench is a benchmark for evaluating the capability of LLM agents to recover from mistakes. This repository provides the tools to generate Recovery-Bench traces and run replay/recovery agents on terminal-based tasks.
+
+🔗 Read more on our blog: [letta.com/blog/recovery-bench](https://www.letta.com/blog/recovery-bench)
 
 ## Quick Start
 
