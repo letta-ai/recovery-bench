@@ -7,7 +7,7 @@ import shutil
 
 from terminal_bench import BaseAgent
 from terminal_bench.terminal.tmux_session import TmuxSession
-from terminal_bench.agents.terminus import Terminus, Command, CommandBatchResponse
+from terminal_bench.agents.terminus_1 import Terminus, Command, CommandBatchResponse
 from terminal_bench.llms.chat import Chat
 from terminal_bench.agents.failure_mode import FailureMode
 from terminal_bench.agents.base_agent import AgentResult

@@ -142,6 +142,12 @@ def main():
         default="0.2.15",
         help="Dataset version to use for initial trace generation",
     )
+    parser.add_argument(
+        "--resume-initial",
+        type=str,
+        default=None,
+        help="Path to an existing initial trajectories directory to resume from (skips initial generation)",
+    )
 
     args = parser.parse_args()
 
@@ -152,11 +158,17 @@ def main():
     if args.cleanup_container:
         cleanup_docker()
 
-    # Step 1: Generate initial traces
-    initial_run_id = f"initial-{model_short}-{timestamp}"
-    initial_traces_dir = generate_initial_traces(
-        args.model_name, initial_run_id, args.dataset_version, args.n_concurrent
-    )
+    # Step 1: Generate initial traces or resume from existing
+    if args.resume_initial:
+        initial_traces_dir = args.resume_initial
+        print(
+            f"Resuming from existing initial trajectories at {initial_traces_dir}"
+        )
+    else:
+        initial_run_id = f"initial-{model_short}-{timestamp}"
+        initial_traces_dir = generate_initial_traces(
+            args.model_name, initial_run_id, args.dataset_version, args.n_concurrent
+        )
 
     if args.run_initial:
         print(f"Just running initial traces for {args.model_name}")
