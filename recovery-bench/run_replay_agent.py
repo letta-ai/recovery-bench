@@ -9,7 +9,7 @@ Example: python -m self_correction.run_replay_agent --trajectory-folder runs/col
 """
 
 import argparse
-import datetime
+from datetime import datetime
 import sys
 from pathlib import Path
 
@@ -53,7 +53,7 @@ def main():
         help="Import path for the agent",
     )
     parser.add_argument(
-        "--n-concurrent", type=int, default=1, help="Number of concurrent processes"
+        "--n-concurrent", type=int, default=6, help="Number of concurrent processes"
     )
     parser.add_argument(
         "--task-folder",
@@ -103,7 +103,7 @@ def main():
     print(f"Running replay agent for {len(task_ids)} task(s)")
 
     if args.run_id is None:
-        run_id = f"replay-{args.model_name}-{datetime.now().strftime('%Y-%m-%d__%H-%M-%S')}-with-{args.trajectory_folder.split('/')[-1]}"
+        run_id = f"replay-{args.model_name.split('/')[-1]}-{args.agent_import_path.split(':')[-1].lower()}-with-{args.trajectory_folder.split('/')[-1]}"
     else:
         run_id = args.run_id
 
