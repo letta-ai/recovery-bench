@@ -9,6 +9,7 @@ Example: python -m self_correction.run_replay_agent --trajectory-folder runs/col
 """
 
 import argparse
+import datetime
 import sys
 from pathlib import Path
 
@@ -101,11 +102,16 @@ def main():
 
     print(f"Running replay agent for {len(task_ids)} task(s)")
 
+    if args.run_id is None:
+        run_id = f"replay-{args.model_name}-{datetime.now().strftime('%Y-%m-%d__%H-%M-%S')}-with-{args.trajectory_folder.split('/')[-1]}"
+    else:
+        run_id = args.run_id
+
     return run_replay_agent_tb(
         trajectory_folder=args.trajectory_folder,
         model_name=args.model_name,
         task_ids=task_ids,
-        run_id=args.run_id,
+        run_id=run_id,
         dataset_name=args.dataset_name,
         dataset_version=args.dataset_version,
         agent_import_path=args.agent_import_path,
