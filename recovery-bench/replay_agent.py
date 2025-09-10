@@ -235,6 +235,39 @@ class ReplayAgent(Terminus, ReplayABC):
             print(f"Session: {session}")
             raise e
         return result
+    
+
+    def _execute_commands(
+        self,
+        commands: list[Command],
+        session: TmuxSession,
+    ) -> tuple[bool, str]:
+        """Execute a batch of commands in the terminal.
+
+        Args:
+            commands: List of commands to execute
+            session: TmuxSession instance
+
+        Returns:
+            Tuple of (timeout_occurred, terminal_output)
+        """
+        for command in commands:
+            try:
+                session.send_keys(
+                    command.keystrokes,
+                    block=command.is_blocking
+                    and not (
+                        command.keystrokes.strip().endswith("EOF")
+                        or command.keystrokes.strip().endswith("&")
+                    ),
+                    max_timeout_sec=command.timeout_sec,
+                )
+            except TimeoutError:
+                # We do not care about timeout errors, just keep sending commands
+                continue
+
+        return False, session.capture_pane()
+
 
     def _run_agent_loop(
         self,
