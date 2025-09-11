@@ -60,5 +60,7 @@ python3 -m recovery-bench.run_replay_agent \
 - `--task-folder`: Path to task definitions folder (default: ./terminal-bench/tasks)
 - `--cleanup-container`: Clean up Docker containers before running
 
-TODO:
-- [ ] Bumping up terminal-bench version
+TODOs:
+- [ ] Bumping up terminal-bench version (blocked, pending tb 2.0)
+- [ ] ReplayAgent for terminus2
+- [ ] Looking into swebench.
