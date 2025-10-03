@@ -7,8 +7,9 @@ Recovery-SWE-Agent is a wrapper for testing LLM agents' ability to recover from 
 ### Install SWE-bench
 SWE-bench uses Docker for reproducible evaluations. If you don't have Docker installed, follow the [Docker setup guide](https://docs.docker.com/engine/install/) to install Docker on your machine.
 
-Navigate to the SWE-bench directory and install:
+In recovery-swe-agent directory, run the following:
 ```bash
+git clone git@github.com:princeton-nlp/SWE-bench.git
 cd SWE-bench
 pip install -e .
 ```
