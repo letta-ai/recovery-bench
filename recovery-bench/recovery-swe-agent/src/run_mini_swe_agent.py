@@ -1,7 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
-from swe_utils import run_replay_agent_swe
+from .swe_utils import run_replay_agent_swe
 
 
 def main():
@@ -56,12 +56,15 @@ def main():
         print(f"Error: Mini-SWE-Agent trajectory folder {args.trajectory_folder} does not exist")
         return 1
     
+    #Make CWD recovery-swe-agent
+    cwd = Path(__file__).parent.parent
+    
     #Collect args for run_replay_agent_swe
     model = args.model
     recovery_mode = args.recovery_mode
     run_id = args.run_id
     max_workers = args.max_workers
-    return run_replay_agent_swe(trajectory_folder, model, run_id, recovery_mode, max_workers)
+    return run_replay_agent_swe(cwd, trajectory_folder, model, run_id, recovery_mode, max_workers)
     
 if __name__ == "__main__":
     sys.exit(main())

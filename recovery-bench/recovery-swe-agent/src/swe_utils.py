@@ -1,24 +1,26 @@
-from typing import List
-from pathlib import Path
 import json
 import re
 import json
-from minisweagent.environments.docker import DockerEnvironment
-from swe_replay_agent import RecoverySWEAgent
-from minisweagent.models import get_model
 import subprocess
 import shutil
 import os
+import sys
+from typing import List
+from pathlib import Path
+from minisweagent.environments.docker import DockerEnvironment
+from .swe_replay_agent import RecoverySWEAgent
+from minisweagent.models import get_model
+from swebench.harness.run_evaluation import main as run
 
 #Using these global variables for now, integrate absolute paths later when deciding on entire recovery-bench structure
 JSON = "json"
 JSONL = "jsonl"
 TXT = "txt"
-PREDICTIONS_PATH = Path("predictions")
 DATASET = "princeton-nlp/SWE-bench_Verified"
 
-#For when full dataset is available, for now testing with individual instances
-EVAL_RESULTS_PATH = "evaluation_results"
+#Predictions and Evaluation-Results Paths relative to recovery-swe-agent directory
+PREDICTIONS_PATH = Path("predictions")
+EVAL_RESULTS_PATH = Path("evaluation-results")
 
 #Helper for parsing commands to store in separate commands.json file
 def get_commands(data: dict) -> list: 
@@ -113,19 +115,22 @@ def get_agent_config(cfg: dict) -> dict:
 
 #Puts recovery agent patch in swebench evaluator format
 ### Right now written for one instance, refactor and scale to recovery-bench dataset 
-def write_predictions(instance_id: str, 
-                      model: str, 
-                      patch: str,
-                      run_id: str) -> int:
+def write_predictions(
+        cwd: Path,
+        instance_id: str, 
+        model: str, 
+        patch: str,
+        run_id: str
+    ) -> int:
     to_write = {
                 "instance_id": instance_id,
                 "model_name_or_path": model,
                 "model_patch": patch
                 }
-    path_to_predictions = str(PREDICTIONS_PATH / f"{run_id}.{JSONL}")
+    path_to_predictions = str(cwd / PREDICTIONS_PATH / f"{run_id}.{JSONL}")
     try:
-        with open(path_to_predictions, "w") as f:
-            f.write(json.dumps(to_write))
+        with open(path_to_predictions, "a") as f:
+            f.write(json.dumps(to_write) + '\n')
         return 0
     except Exception as e:
         print("ERROR: Couldn't write predictions to json")
@@ -147,9 +152,9 @@ def move_eval_result(model: str, run_id: str) -> int:
     return 0
 
 #Get the result and return
-def get_result(model: str, run_id) -> int:
+def get_result(cwd: Path, model: str, run_id) -> int:
     model_name = safe_model_name(model)
-    run_path = Path(EVAL_RESULTS_PATH / f"{model_name}.{run_id}.{JSON}")
+    run_path = Path(cwd / EVAL_RESULTS_PATH / f"{model_name}.{run_id}.{JSON}")
     try:
         with open(str(run_path), "r") as f:
             results = json.load(f)
@@ -161,14 +166,20 @@ def get_result(model: str, run_id) -> int:
         print(f"ERROR: Couldn't find path or open result {run_path}")
         return 1
 
-def run_swe_bench(instance_id: str, 
-                  run_id: str,
-                  max_workers: int=1,
-                  ):
+def run_swe_bench_instance(
+        cwd: Path,
+        instance_id: str, 
+        run_id: str,
+        max_workers: int=1,
+    ):
+    """
+    A helper function to run a singular swe bench instance which saves the the result
+    in a json file in CWD, useful for testing/debugging
+    """
     #Make predictions path using run_id
     print("\n\n\n\n\n")
     print("Running SWEBench Evaluator")
-    predictions_path = PREDICTIONS_PATH / f"{run_id}.{JSONL}"
+    predictions_path = cwd / PREDICTIONS_PATH / f"{run_id}.{JSONL}"
     cmd = [
         "python",
         "-m",
@@ -185,17 +196,50 @@ def run_swe_bench(instance_id: str,
         result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True)
         print(result.stdout)
         return 0
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: Command failed with return code {e.returncode}")
+        print(f"STDOUT: {e.stdout}")
+        print(f"STDERR: {e.stderr}")  # THIS is where the error message is!
+        return 1
     except Exception as e:
         print(f"ERROR: Couldn't run swe bench on prediction for instance {instance_id}")
+        print("\n\n\n")
+        print()
         return 1
+    
+def run_swe_bench(
+        instance_ids: list,
+        predicitons_path: str,
+        max_workers: int,
+        force_rebuild: bool,
+        cache_level: str,
+        clean: bool,
+        open_file_limit: int,
+        run_id: str,
+        timeout: int,
+        namespace: str | None,
+        rewrite_reports: bool,
+        modal: bool,
+        dataset_name : str = DATASET,
+        split: str =  "test",
+        instance_image_tag: str = "latest",
+        env_image_tag: str = "latest",
+        report_dir: str = "."
+    ):
+    pass
 
 
-def run_replay_agent_swe(trajectory_folder: Path, 
-                         model: str, 
-                         run_id: str, 
-                         recovery_mode: str = "full_history",
-                         max_workers: int = 1) -> int:
+def run_replay_agent_swe(
+        cwd: Path,
+        trajectory_folder: Path, 
+        model: str, 
+        run_id: str, 
+        recovery_mode: str = "full_history",
+        max_workers: int = 1
+    ) -> int:
     root = Path(trajectory_folder)
+    instances = []
+    print("TESTING CWD: ", cwd)
     if not root.exists():
         print(f"ERROR: Trajectory Path {trajectory_folder} does not exist")
         return 1
@@ -258,10 +302,23 @@ def run_replay_agent_swe(trajectory_folder: Path,
         print(result)
 
         #Write predictions and check
-        if (not write_predictions(instance_id, model, result, run_id)):
-            continue
+        if (not write_predictions(cwd, instance_id, model, result, run_id)):
+            print(f"ERROR: Couldn't write predictions for instance ", instance_id)
+            print("\n\n\n")
 
+        #Keep track of instances for final evaluator
+        instances.append(instance_id)
         #Run SWE Bench evaluator
         ### Until Dataset is guaranteed, just run on singular instance for testing
-        return run_swe_bench(instance_id, run_id, max_workers)
-    return run_swe_bench(instance_id, run_id, max_workers)
+    return run_swe_bench
+
+
+def main():
+    print("Testing if can import swe bench")
+    cwd = Path(__file__).parent.parent
+    print(cwd / "predictions")
+    return_code = run_swe_bench_instance(cwd, "sympy__sympy-15599", "gpt-5-correction-1", 1)
+    #print(os.path.abspath("check.jsonl"))
+
+if __name__ == "__main__":
+    main()
