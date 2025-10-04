@@ -7,7 +7,6 @@ Recovery-SWE-Agent is a wrapper for testing LLM agents' ability to recover from 
 ### Install SWE-bench
 SWE-bench uses Docker for reproducible evaluations. If you don't have Docker installed, follow the [Docker setup guide](https://docs.docker.com/engine/install/) to install Docker on your machine.
 
-In recovery-swe-agent directory, run the following:
 ```bash
 git clone git@github.com:princeton-nlp/SWE-bench.git
 cd SWE-bench
@@ -24,11 +23,10 @@ pip install mini-swe-agent
 ## Quick Start
 
 ### Run Mini SWE Recovery Agent
-Make sure to change directories to the recovery-swe-agent directory and then run
+Use command from toplevel directory
 ```bash
-cd recovery-swe-agent
-python3 src/run_mini_swe_agent.py \
-  --trajectory-folder swe-runs \
+python -m recovery-bench.recovery-swe-agent.src.run_mini_swe_agent \
+  --trajectory-folder recovery-bench/recovery-swe-agent/swe-runs \
   --model-name openai/gpt-5-mini \
   --run-id gpt-5-correction-1 \
   --recovery-mode full_history

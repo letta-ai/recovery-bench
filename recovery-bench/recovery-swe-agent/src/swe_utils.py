@@ -10,7 +10,7 @@ from pathlib import Path
 from minisweagent.environments.docker import DockerEnvironment
 from .swe_replay_agent import RecoverySWEAgent
 from minisweagent.models import get_model
-from swebench.harness.run_evaluation import main as run
+from swebench.harness.run_evaluation import main as run_swe_bench
 
 #Using these global variables for now, integrate absolute paths later when deciding on entire recovery-bench structure
 JSON = "json"
@@ -114,7 +114,6 @@ def get_agent_config(cfg: dict) -> dict:
     return agent_cfg
 
 #Puts recovery agent patch in swebench evaluator format
-### Right now written for one instance, refactor and scale to recovery-bench dataset 
 def write_predictions(
         cwd: Path,
         instance_id: str, 
@@ -192,7 +191,6 @@ def run_swe_bench_instance(
     ]
     #SWE_Bench_Verified for now as that's where toy dirty state came from
     try:
-        cwd = os.getcwd()
         result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True)
         print(result.stdout)
         return 0
@@ -207,28 +205,6 @@ def run_swe_bench_instance(
         print()
         return 1
     
-def run_swe_bench(
-        instance_ids: list,
-        predicitons_path: str,
-        max_workers: int,
-        force_rebuild: bool,
-        cache_level: str,
-        clean: bool,
-        open_file_limit: int,
-        run_id: str,
-        timeout: int,
-        namespace: str | None,
-        rewrite_reports: bool,
-        modal: bool,
-        dataset_name : str = DATASET,
-        split: str =  "test",
-        instance_image_tag: str = "latest",
-        env_image_tag: str = "latest",
-        report_dir: str = "."
-    ):
-    pass
-
-
 def run_replay_agent_swe(
         cwd: Path,
         trajectory_folder: Path, 
@@ -237,12 +213,18 @@ def run_replay_agent_swe(
         recovery_mode: str = "full_history",
         max_workers: int = 1
     ) -> int:
+    
     root = Path(trajectory_folder)
-    instances = []
-    print("TESTING CWD: ", cwd)
     if not root.exists():
         print(f"ERROR: Trajectory Path {trajectory_folder} does not exist")
         return 1
+    
+    #If the predictions path exists for same run_id, delete to create new predictions, otherwise append will error swebench evaluator
+    predictions = cwd / PREDICTIONS_PATH / f"{run_id}.{JSONL}"
+    if predictions.exists():
+        os.remove(predictions)
+
+    instances = []
     for p in root.iterdir():
         traj_path, commands_path = p / "last_swebench_single_run.traj.json", p / "commands.json"
         #Check if trajectories and commands exist
@@ -297,28 +279,41 @@ def run_replay_agent_swe(
         p_task = p / f'task.{TXT}'
         task = get_data(p_task, TXT)
         exit_status, result = agent.run(task)
+
         print("\n\n\n\n\n")
         print("Recovery Agent Returned Patch:")
         print(result)
 
+        #Cleanup docker environment
+        docker_env.cleanup()
+
         #Write predictions and check
-        if (not write_predictions(cwd, instance_id, model, result, run_id)):
+        written = write_predictions(cwd, instance_id, model, result, run_id)
+        if written:
             print(f"ERROR: Couldn't write predictions for instance ", instance_id)
             print("\n\n\n")
+            continue
 
         #Keep track of instances for final evaluator
         instances.append(instance_id)
-        #Run SWE Bench evaluator
-        ### Until Dataset is guaranteed, just run on singular instance for testing
-    return run_swe_bench
 
-
-def main():
-    print("Testing if can import swe bench")
-    cwd = Path(__file__).parent.parent
-    print(cwd / "predictions")
-    return_code = run_swe_bench_instance(cwd, "sympy__sympy-15599", "gpt-5-correction-1", 1)
-    #print(os.path.abspath("check.jsonl"))
-
-if __name__ == "__main__":
-    main()
+    #Run SWE Bench evaluator
+    predictions = str(predictions)
+    return run_swe_bench(
+        dataset_name = DATASET,
+        split = "test",
+        instance_ids=instances,
+        predictions_path = predictions,
+        max_workers = max_workers,
+        force_rebuild = False,
+        cache_level = "env",
+        clean = True,
+        open_file_limit = 4096,
+        run_id = run_id,
+        timeout = 1800,
+        namespace = "swebench",
+        rewrite_reports = False,
+        modal = False,
+        instance_image_tag= "latest",
+        env_image_tag = "latest",
+    )

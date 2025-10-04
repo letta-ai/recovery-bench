@@ -19,7 +19,7 @@ def main():
 
     #Valid mini-swe-agent model
     parser.add_argument(
-        "--model", 
+        "--model-name", 
         type=str, 
         required=True, 
         help="Name of the model to use"
@@ -60,7 +60,7 @@ def main():
     cwd = Path(__file__).parent.parent
     
     #Collect args for run_replay_agent_swe
-    model = args.model
+    model = args.model_name
     recovery_mode = args.recovery_mode
     run_id = args.run_id
     max_workers = args.max_workers
