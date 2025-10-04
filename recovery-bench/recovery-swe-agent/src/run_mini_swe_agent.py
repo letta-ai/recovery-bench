@@ -1,3 +1,9 @@
+"""
+Run replay/recovery agent.
+
+This script runs the replay agent on collected trajectories for swebench.
+"""
+
 import argparse
 import sys
 from pathlib import Path
