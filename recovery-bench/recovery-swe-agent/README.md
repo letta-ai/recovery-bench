@@ -44,5 +44,5 @@ For avaliable models, see [mini-swe-agent models](https://mini-swe-agent.com/lat
 
 ## TODOs:
 - [ ] Implement action_summary
-- [ ] Add trace generation capabilities
-- [ ] Support for running swebench harness on entire swe-bench dataset rather than one instance
+- [ ] Add trace generation capabilities along with trace formatting
+- [ ] Experiment with minisweagent prompt
