@@ -226,77 +226,86 @@ def run_replay_agent_swe(
 
     instances = []
     for p in root.iterdir():
-        traj_path, commands_path = p / "last_swebench_single_run.traj.json", p / "commands.json"
-        #Check if trajectories and commands exist
-        if not traj_path.exists() or not commands_path.exists():
+        docker_env = None
+        try:
+            traj_path, commands_path = p / "last_swebench_single_run.traj.json", p / "commands.json"
+            #Check if trajectories and commands exist
+            if not traj_path.exists() or not commands_path.exists():
+                continue
+            traj, commands = get_data(traj_path, JSON), get_data(commands_path, JSON)
+            #Data didn't load properly, try for next trajectory or commands didn't load
+            if traj == 1 or commands == []:
+                continue
+            
+            #Create Config and set up Model Configuration
+            cfg = get_cfg(traj)
+            if cfg == 1:
+                print("ERROR: Couldn't parse config from trajectory")
+                return 1
+            model_cfg = make_model_cfg(model)
+            if model_cfg == 1:
+                print("ERROR: Please enter a supported LiteLLM model name")
+                return 1
+            cfg["model"] = model_cfg
+            agent_model = get_model(model, model_cfg)
+            
+            #Create Docker Environment
+            env = cfg["environment"]
+            docker_env = DockerEnvironment(**env)
+
+            #Get message history based on recovery_mode
+            msgs = get_message_history(traj, recovery_mode)
+            summary = create_summary(msgs, recovery_mode)
+            inject_recovery(cfg, recovery_mode, summary)
+
+            #Create Agent
+            _agent_cfg = get_agent_config(cfg)
+            agent = RecoverySWEAgent(
+                model = agent_model, 
+                env = docker_env, 
+                messages = msgs,
+                **_agent_cfg)
+
+            #Restore the dirty state
+            commands_lst = commands["commands"]
+            instance_id = commands["instance"]
+
+            #Keep track of command numbers to verify if correct commands are being executed for state
+            i = 0
+            for command in commands_lst:
+                print(f"Restoring State of {instance_id} with command: {command}, {i}")
+                agent.env.execute(command)
+                i += 1
+            
+            #Run Task 
+            p_task = p / f'task.{TXT}'
+            task = get_data(p_task, TXT)
+            exit_status, result = agent.run(task)
+
+            print("\n\n\n\n\n")
+            print("Recovery Agent Returned Patch:")
+            print(result)
+
+            #Write predictions and check
+            written = write_predictions(cwd, instance_id, model, result, run_id)
+            if written:
+                print(f"ERROR: Couldn't write predictions for instance ", instance_id)
+                print("\n\n\n")
+                continue
+
+            #Keep track of instances for final evaluator
+            instances.append(instance_id)
+        except Exception as e:
+            print(f"ERROR processing instance: {e}")
             continue
-        traj, commands = get_data(traj_path, JSON), get_data(commands_path, JSON)
-        #Data didn't load properly, try for next trajectory or commands didn't load
-        if traj == 1 or commands == []:
-             continue
-        
-        #Create Config and set up Model Configuration
-        cfg = get_cfg(traj)
-        if cfg == 1:
-            print("ERROR: Couldn't parse config from trajectory")
-            return 1
-        model_cfg = make_model_cfg(model)
-        if model_cfg == 1:
-            print("ERROR: Please enter a supported LiteLLM model name")
-            return 1
-        cfg["model"] = model_cfg
-        agent_model = get_model(model, model_cfg)
-        
-        #Create Docker Environment
-        env = cfg["environment"]
-        docker_env = DockerEnvironment(**env)
-
-        #Get message history based on recovery_mode
-        msgs = get_message_history(traj, recovery_mode)
-        summary = create_summary(msgs, recovery_mode)
-        inject_recovery(cfg, recovery_mode, summary)
-
-        #Create Agent
-        _agent_cfg = get_agent_config(cfg)
-        agent = RecoverySWEAgent(
-            model = agent_model, 
-            env = docker_env, 
-            messages = msgs,
-            **_agent_cfg)
-
-        #Restore the dirty state
-        commands_lst = commands["commands"]
-        instance_id = commands["instance"]
-
-        #Keep track of command numbers to verify if correct commands are being executed for state
-        i = 0
-        for command in commands_lst:
-            print(f"Restoring State of {instance_id} with command: {command}, {i}")
-            agent.env.execute(command)
-            i += 1
-        
-        #Run Task 
-        p_task = p / f'task.{TXT}'
-        task = get_data(p_task, TXT)
-        exit_status, result = agent.run(task)
-
-        print("\n\n\n\n\n")
-        print("Recovery Agent Returned Patch:")
-        print(result)
-
-        #Cleanup docker environment
-        docker_env.cleanup()
-
-        #Write predictions and check
-        written = write_predictions(cwd, instance_id, model, result, run_id)
-        if written:
-            print(f"ERROR: Couldn't write predictions for instance ", instance_id)
-            print("\n\n\n")
-            continue
-
-        #Keep track of instances for final evaluator
-        instances.append(instance_id)
-
+        #Always clean up the docker environment no matter what
+        finally:
+            if docker_env is not None:
+                try:
+                    docker_env.cleanup()
+                except Exception as e:
+                    print(f"Warning: Cleanup failed: {e}")
+                    
     #Run SWE Bench evaluator
     predictions = str(predictions)
     return run_swe_bench(
