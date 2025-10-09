@@ -56,7 +56,6 @@ Output: {output}
 Answer ONLY "Yes" or "No"."""
 
     try:
-        logging.debug(f"Making LLM call for output: {output[:100]}...")
         # Small delay to avoid rate limiting
         time.sleep(0.1)
         
@@ -68,12 +67,9 @@ Answer ONLY "Yes" or "No"."""
         )
         response_text = response.choices[0].message.content
         
-        result = "yes" in response_text.strip().lower()
-        logging.debug(f"LLM response: {response_text.strip()}, result: {result}")
-        return result
+        return "yes" in response_text.strip().lower()
     except Exception as e:
-        # Log the LLM specific error clearly
-        logging.error(f"LLM API call failed for error detection: {type(e).__name__}: {e}")
+        logging.error(f"LLM API call failed: {e}")
         return False
 
 def is_target_error(output: str) -> bool:
@@ -83,18 +79,15 @@ def is_target_error(output: str) -> bool:
     if not output.strip():
         return False
     
-    # Fast Pre-Check: If regex matches, it is highly likely an error. Use LLM to confirm type.
+    # Fast Pre-Check: If regex matches, use LLM to confirm error type
     if ERROR_REGEX.search(output):
-        logging.debug("Regex match found, invoking LLM for confirmation.")
         return llm_check_error(output)
         
-    # slow Pre-Check: If output is very short (e.g., just a prompt or a single word),
-    # and no regex match, assume no error and skip the LLM entirely.
+    # Skip very short outputs (likely just prompts)
     if len(output.split('\n')) < 3 and not output.strip().startswith(('Traceback', 'Error')):
         return False
 
-    # final check for ambiguous outputs that didn't match the simple regex
-    logging.debug("No simple match, invoking LLM for full check.")
+    # Final check for ambiguous outputs
     return llm_check_error(output)
 
 # analyze trajectory
@@ -168,7 +161,7 @@ def analyze_episode(episode_path: Path):
     clean_commands = []
     for step in steps:
         if is_target_error(step["output"]):
-            logging.info(f"Target error found in episode {episode_path.name}")
+            logging.info(f"Error found in {episode_path.name}")
             return episode_path, clean_commands
         else:
             clean_commands.extend(step["commands"])
@@ -191,7 +184,7 @@ def save_recovery_trace(episode_path: Path, clean_commands: list):
     with open(save_path / "recovery_trace.json", 'w') as f:
         json.dump(data, f, indent=2)
     
-    logging.info(f"Saved {len(clean_commands)} clean commands for {episode_path.name}")
+    logging.info(f"Saved {len(clean_commands)} commands for {episode_path.name}")
 
 def main():
     """Main function: finds trajectories and processes episodes concurrently."""
@@ -200,11 +193,10 @@ def main():
     if not api_key:
         logging.error("OPENAI_API_KEY not set in environment variables.")
         return
-    logging.info(f"API key loaded: {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
+    logging.info("API key loaded")
     SAVE_POINTS_FOLDER.mkdir(exist_ok=True)
     openai.api_key = api_key
     
-    logging.info("Testing LLM connection...")
     try:
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
@@ -212,10 +204,9 @@ def main():
             max_tokens=3,
             temperature=0
         )
-        test_response = response.choices[0].message.content
-        logging.info(f"LLM test successful: {test_response.strip()}")
+        logging.info("LLM connection successful")
     except Exception as e:
-        logging.error(f"LLM connection test failed: {type(e).__name__}: {e}")
+        logging.error(f"LLM connection failed: {e}")
         return
     task_path = BASE_RUNS_FOLDER / TARGET_TASK
     if not task_path.exists():
@@ -228,7 +219,6 @@ def main():
         logging.error(f"No trajectories found in {task_path.name}")
         return
     traj_path = trajectories[0]
-    logging.info(f"Processing trajectory: {traj_path.name}")
     agent_logs = traj_path / "agent-logs"
     episodes = sorted(
         [item for item in agent_logs.iterdir() if item.is_dir() and item.name.startswith("episode-")],
@@ -237,39 +227,31 @@ def main():
     if not episodes:
         logging.error(f"No episodes found in {agent_logs.name}")
         return
-    logging.info(f"Found {len(episodes)} episodes. Starting concurrent analysis...")
+    logging.info(f"Found {len(episodes)} episodes")
     
-    # using ThreadPoolExecutor for concurrent LLM API calls (I/O bound)
     max_workers = 2 
     save_points_created = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # submit all analysis jobs
         future_to_episode = {
             executor.submit(analyze_episode, episode_path): episode_path
             for episode_path in episodes
         }
         
-        # processing results as they complete
         for future in as_completed(future_to_episode):
             episode_path = future_to_episode[future]
             
             try:
-                # get the result from analyze_episode
                 _, clean_commands = future.result()
             except Exception as e:
-                logging.error(f"Exception raised during processing of {episode_path.name}: {e}")
+                logging.error(f"Error processing {episode_path.name}: {e}")
                 continue
 
             if clean_commands:
                 save_recovery_trace(episode_path, clean_commands)
                 save_points_created += 1
-            else:
-                logging.info(f"Episode {episode_path.name}: No clean commands found.")
     
-    logging.info(f"Analysis Complete")
-    logging.info(f"Processed {len(episodes)} episodes.")
-    logging.info(f"Created {save_points_created} save points.")
+    logging.info(f"Complete: {save_points_created}/{len(episodes)} save points created")
 
 if __name__ == "__main__":
     main()
