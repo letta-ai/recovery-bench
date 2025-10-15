@@ -7,6 +7,8 @@ Features:
 3. Concurrent processing with ThreadPoolExecutor
 4. Targets specific error types: NameError, TypeError, AttributeError, application failures
 5. Creates recovery traces with clean commands before first target error
+6. EXCLUDES: "command not found" and "timeout" errors (these do NOT count as errors)
+7. Outputs error types for each command that has errors (excluding the main three)
 """
 
 import os
@@ -41,19 +43,24 @@ ERROR_REGEX = re.compile(
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
-def llm_check_error(output: str) -> bool:
-    """Use LLM to detect if output contains one of the target error types."""
+def llm_check_error(output: str) -> tuple[bool, str]:
+    """Use LLM to detect if output contains one of the target error types and return error type."""
     
-    # 1. Increase token limit for reliability (was 5, now 10)
-    prompt = f"""Does this terminal output contain one of these specific error types?
+    prompt = f"""Does this terminal output contain an error? If yes, what type of error is it?
 
-1. Undefined names/symbols in runtime (NameError, undefined variable, "is not defined")
-2. Application-level failure reported (fatal error, application error, segmentation fault, core dumped)
-3. Type/attribute errors at runtime (TypeError, AttributeError, "has no attribute", "unsupported operand type")
+IMPORTANT: Do NOT consider these as errors:
+- "command not found" errors
+- "timeout" errors
+- "No module named" errors (these are just missing dependencies)
+
+If there is an error (excluding the above), identify the specific error type.
+If no error or only excluded errors, respond with "No error".
 
 Output: {output}
 
-Answer ONLY "Yes" or "No"."""
+Respond with either:
+- "No error" if no errors or only excluded errors
+- The specific error type if there is a real error (e.g., "NameError", "TypeError", "AttributeError", "SyntaxError", "RuntimeError", etc.)"""
 
     try:
         # Small delay to avoid rate limiting
@@ -62,32 +69,32 @@ Answer ONLY "Yes" or "No"."""
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
+            max_tokens=50,
             temperature=0
         )
-        response_text = response.choices[0].message.content
+        response_text = response.choices[0].message.content.strip()
         
-        return "yes" in response_text.strip().lower()
+        if "no error" in response_text.lower():
+            return False, ""
+        else:
+            return True, response_text
     except Exception as e:
         logging.error(f"LLM API call failed: {e}")
-        return False
+        return False, ""
 
-def is_target_error(output: str) -> bool:
+def is_target_error(output: str) -> tuple[bool, str]:
     """
     Combined check: uses regex for a fast filter, then uses LLM if necessary.
+    Returns (is_error, error_type)
     """
     if not output.strip():
-        return False
+        return False, ""
     
-    # Fast Pre-Check: If regex matches, use LLM to confirm error type
-    if ERROR_REGEX.search(output):
-        return llm_check_error(output)
-        
     # Skip very short outputs (likely just prompts)
     if len(output.split('\n')) < 3 and not output.strip().startswith(('Traceback', 'Error')):
-        return False
+        return False, ""
 
-    # Final check for ambiguous outputs
+    # Always use LLM to check for errors (excluding command not found and timeout)
     return llm_check_error(output)
 
 # analyze trajectory
@@ -95,18 +102,18 @@ def is_target_error(output: str) -> bool:
 def analyze_episode(episode_path: Path):
     """
     Analyze one episode and return clean commands before first target error.
-    Returns a tuple: (episode_path, clean_commands)
+    Returns a tuple: (episode_path, clean_commands, error_type)
     """
     debug_file = episode_path / "debug.json"
     if not debug_file.exists():
-        return episode_path, []
+        return episode_path, [], ""
     
     try:
         with open(debug_file, 'r') as f:
             debug_data = json.load(f)
     except Exception as e:
         logging.error(f"Failed to read/load JSON from {debug_file}: {e}")
-        return episode_path, []
+        return episode_path, [], ""
     
     messages = debug_data.get("input", [])
     
@@ -160,16 +167,18 @@ def analyze_episode(episode_path: Path):
 
     clean_commands = []
     for step in steps:
-        if is_target_error(step["output"]):
-            logging.info(f"Error found in {episode_path.name}")
-            return episode_path, clean_commands
+        is_error, error_type = is_target_error(step["output"])
+        if is_error:
+            logging.info(f"Error found in {episode_path.name}: {error_type}")
+            print(f"Episode {episode_path.name}: Error Type - {error_type}")
+            return episode_path, clean_commands, error_type
         else:
             clean_commands.extend(step["commands"])
             
     # if the episode completed without a detected target error
-    return episode_path, clean_commands
+    return episode_path, clean_commands, ""
 
-def save_recovery_trace(episode_path: Path, clean_commands: list):
+def save_recovery_trace(episode_path: Path, clean_commands: list, error_type: str):
     """Save the recovery trace to the structured save points folder."""
     # Ensure save paths are relative to BASE_RUNS_FOLDER for a clean structure
     relative_path = episode_path.relative_to(BASE_RUNS_FOLDER)
@@ -179,12 +188,13 @@ def save_recovery_trace(episode_path: Path, clean_commands: list):
     data = {
         "original_episode": str(episode_path),
         "clean_commands": clean_commands,
-        "total_clean_commands": len(clean_commands)
+        "total_clean_commands": len(clean_commands),
+        "error_type": error_type
     }
     with open(save_path / "recovery_trace.json", 'w') as f:
         json.dump(data, f, indent=2)
     
-    logging.info(f"Saved {len(clean_commands)} commands for {episode_path.name}")
+    logging.info(f"Saved {len(clean_commands)} commands for {episode_path.name} with error type: {error_type}")
 
 def main():
     """Main function: finds trajectories and processes episodes concurrently."""
@@ -229,27 +239,23 @@ def main():
         return
     logging.info(f"Found {len(episodes)} episodes")
     
-    max_workers = 2 
     save_points_created = 0
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_episode = {
-            executor.submit(analyze_episode, episode_path): episode_path
-            for episode_path in episodes
-        }
-        
-        for future in as_completed(future_to_episode):
-            episode_path = future_to_episode[future]
-            
-            try:
-                _, clean_commands = future.result()
-            except Exception as e:
-                logging.error(f"Error processing {episode_path.name}: {e}")
-                continue
+    # Sequentially process episodes; stop at the first episode containing an error
+    for episode_path in episodes:
+        try:
+            _, clean_commands, error_type = analyze_episode(episode_path)
+        except Exception as e:
+            logging.error(f"Error processing {episode_path.name}: {e}")
+            continue
 
-            if clean_commands:
-                save_recovery_trace(episode_path, clean_commands)
-                save_points_created += 1
+        if error_type:
+            # Always save a recovery trace for the first error episode,
+            # even if there are zero clean commands before the error
+            save_recovery_trace(episode_path, clean_commands, error_type)
+            save_points_created += 1
+            print(f"Stopping at episode {episode_path.name} due to error: {error_type}")
+            break
     
     logging.info(f"Complete: {save_points_created}/{len(episodes)} save points created")
 
