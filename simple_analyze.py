@@ -4,11 +4,11 @@ Ultra-simple trajectory analysis script for Recovery-Bench
 Features:
 1. Direct OpenAI API integration (no terminal-bench dependencies)
 2. Regex pre-check to minimize LLM calls (efficiency/cost)
-3. Concurrent processing with ThreadPoolExecutor
-4. Targets specific error types: NameError, TypeError, AttributeError, application failures
-5. Creates recovery traces with clean commands before first target error
-6. EXCLUDES: "command not found" and "timeout" errors (these do NOT count as errors)
-7. Outputs error types for each command that has errors (excluding the main three)
+3. Targets specific error types: NameError, TypeError, AttributeError, application failures
+4. EXCLUDES: "command not found" and "timeout" errors (these do NOT count as errors)
+5. Finds the first episode containing a target error
+6. Copies episodes 0 through the errored episode to save_points in ReplayAgent format
+7. Outputs error types for the errored episode
 """
 
 import os
@@ -16,16 +16,23 @@ import json
 import logging
 import re
 import time
+import shutil
+import hashlib
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import openai
 
 # Use absolute paths for robustness
 BASE_DIR = Path(__file__).parent.resolve()
-TARGET_TASK = "4ab82a39-chess-best-move"
 BASE_RUNS_FOLDER = BASE_DIR / "runs/gpt-4o-mini-collected-20250714_232243"
 SAVE_POINTS_FOLDER = BASE_DIR / "save_points"
+
+# Tasks to process (can be modified or set to None to process all)
+TARGET_TASKS = [
+    "4ab82a39-chess-best-move",
+    "1e9d5280-parallelize-graph",
+    "0812d36d-npm-conflict-resolution"
+]
 
 # Regex for cheap pre-check (case-insensitive)
 # Captures common error indicators for the target types
@@ -41,6 +48,11 @@ ERROR_REGEX = re.compile(
 )
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+# Done to be compatible with the ReplayAgent format
+def create_task_hash(task_description: str) -> str:
+    """Create 8-character hash from task description."""
+    return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
 
 
 def llm_check_error(output: str) -> tuple[bool, str]:
@@ -178,26 +190,128 @@ def analyze_episode(episode_path: Path):
     # if the episode completed without a detected target error
     return episode_path, clean_commands, ""
 
-def save_recovery_trace(episode_path: Path, clean_commands: list, error_type: str):
-    """Save the recovery trace to the structured save points folder."""
-    # Ensure save paths are relative to BASE_RUNS_FOLDER for a clean structure
-    relative_path = episode_path.relative_to(BASE_RUNS_FOLDER)
-    save_path = SAVE_POINTS_FOLDER / relative_path
-    save_path.mkdir(parents=True, exist_ok=True)
+def copy_episodes_for_replay(
+    task_hash: str, 
+    task_name: str, 
+    trajectory_path: Path,
+    episodes: list, 
+    error_episode_num: int,
+    error_type: str
+) -> Path:
+    """
+    Copy episodes 0 through error_episode_num to save_points in ReplayAgent format.
     
-    data = {
-        "original_episode": str(episode_path),
-        "clean_commands": clean_commands,
-        "total_clean_commands": len(clean_commands),
-        "error_type": error_type
+    Structure: save_points/{hash}-{task_name}/{task_name}.1-of-1.{run_id}/agent-logs/episode-N/
+    """
+    # Extract run_id from trajectory path name
+    # ex, "chess-best-move.1-of-1.initial-gpt-4o-mini-20250714_232243"
+    traj_name = trajectory_path.name
+    if ".1-of-1." in traj_name:
+        run_id = traj_name.split(".1-of-1.")[-1]
+    else:
+        # Fallback: use a default run_id
+        run_id = "replay-recovery"
+    
+    # Create save path structure
+    base_save_path = SAVE_POINTS_FOLDER / f"{task_hash}-{task_name}"
+    traj_save_path = base_save_path / f"{task_name}.1-of-1.{run_id}"
+    agent_logs_save = traj_save_path / "agent-logs"
+    agent_logs_save.mkdir(parents=True, exist_ok=True)
+    
+    # Copy episodes 0 through error_episode_num (inclusive)
+    episodes_copied = 0
+    for i in range(error_episode_num + 1):  # +1 to include errored episode
+        if i < len(episodes):
+            episode_src = episodes[i]
+            episode_dest = agent_logs_save / f"episode-{i}"
+            
+            # Copy entire episode directory
+            if episode_dest.exists():
+                shutil.rmtree(episode_dest)
+            shutil.copytree(episode_src, episode_dest)
+            episodes_copied += 1
+            logging.info(f"Copied {episode_src.name} -> {episode_dest.name}")
+    
+    # Save error metadata for reference
+    error_metadata = {
+        "error_episode": error_episode_num,
+        "error_type": error_type,
+        "episodes_copied": episodes_copied,
+        "original_trajectory": str(trajectory_path)
     }
-    with open(save_path / "recovery_trace.json", 'w') as f:
-        json.dump(data, f, indent=2)
+    with open(traj_save_path / "error_metadata.json", 'w') as f:
+        json.dump(error_metadata, f, indent=2)
     
-    logging.info(f"Saved {len(clean_commands)} commands for {episode_path.name} with error type: {error_type}")
+    logging.info(f"Saved {episodes_copied} episodes (0-{error_episode_num}) for ReplayAgent in {traj_save_path}")
+    return traj_save_path
+
+def process_task(task_id: str) -> bool:
+    """Process a single task and copy episodes for ReplayAgent. Returns True if error found."""
+    task_path = BASE_RUNS_FOLDER / task_id
+    if not task_path.exists():
+        logging.error(f"Task not found: {task_id}")
+        return False
+    
+    logging.info(f"Processing task: {task_id}")
+    trajectories = [item for item in task_path.iterdir() 
+                    if item.is_dir() and (item / "agent-logs").is_dir()]
+    if not trajectories:
+        logging.error(f"No trajectories found in {task_id}")
+        return False
+    
+    traj_path = trajectories[0]
+    agent_logs = traj_path / "agent-logs"
+    episodes = sorted(
+        [item for item in agent_logs.iterdir() if item.is_dir() and item.name.startswith("episode-")],
+        key=lambda x: int(x.name.split("-")[1])
+    )
+    if not episodes:
+        logging.error(f"No episodes found in {agent_logs.name}")
+        return False
+    
+    logging.info(f"Found {len(episodes)} episodes for {task_id}")
+
+    # Extract task hash and name from task_id (format: "hash-task-name")
+    if "-" in task_id:
+        parts = task_id.split("-", 1)  # Split on first "-" only
+        task_hash = parts[0]
+        task_name = parts[1]
+    else:
+        # Fallback: use task name as-is
+        logging.warning(f"Task ID '{task_id}' doesn't have hash prefix. Using as-is...")
+        task_hash = "unknown"
+        task_name = task_id
+
+    # Sequentially process episodes; stop at the first episode containing an error
+    for idx, episode_path in enumerate(episodes):
+        try:
+            _, clean_commands, error_type = analyze_episode(episode_path)
+        except Exception as e:
+            logging.error(f"Error processing {episode_path.name}: {e}")
+            continue
+
+        if error_type:
+            # Copy episodes 0 through the errored episode for ReplayAgent
+            episode_num = idx  # Current episode index
+            copy_episodes_for_replay(
+                task_hash=task_hash,
+                task_name=task_name,
+                trajectory_path=traj_path,
+                episodes=episodes,
+                error_episode_num=episode_num,
+                error_type=error_type
+            )
+            print(f"\nTask {task_id}: Error found in episode {episode_num} ({episode_path.name})")
+            print(f"   Error Type: {error_type}")
+            print(f"   Copied episodes 0-{episode_num} to save_points for ReplayAgent\n")
+            return True
+    
+    logging.info(f"No errors found in {task_id}")
+    return False
+
 
 def main():
-    """Main function: finds trajectories and processes episodes concurrently."""
+    """Main function: processes multiple tasks."""
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -218,46 +332,25 @@ def main():
     except Exception as e:
         logging.error(f"LLM connection failed: {e}")
         return
-    task_path = BASE_RUNS_FOLDER / TARGET_TASK
-    if not task_path.exists():
-        logging.error(f"Task not found: {task_path.name}")
+    
+    if not TARGET_TASKS:
+        logging.error("No tasks specified in TARGET_TASKS")
         return
-    logging.info(f"Processing task: {TARGET_TASK}")
-    trajectories = [item for item in task_path.iterdir() 
-                    if item.is_dir() and (item / "agent-logs").is_dir()]
-    if not trajectories:
-        logging.error(f"No trajectories found in {task_path.name}")
-        return
-    traj_path = trajectories[0]
-    agent_logs = traj_path / "agent-logs"
-    episodes = sorted(
-        [item for item in agent_logs.iterdir() if item.is_dir() and item.name.startswith("episode-")],
-        key=lambda x: int(x.name.split("-")[1])
-    )
-    if not episodes:
-        logging.error(f"No episodes found in {agent_logs.name}")
-        return
-    logging.info(f"Found {len(episodes)} episodes")
+    
+    logging.info(f"Processing {len(TARGET_TASKS)} task(s): {TARGET_TASKS}")
     
     save_points_created = 0
-
-    # Sequentially process episodes; stop at the first episode containing an error
-    for episode_path in episodes:
+    for task_id in TARGET_TASKS:
         try:
-            _, clean_commands, error_type = analyze_episode(episode_path)
+            if process_task(task_id):
+                save_points_created += 1
         except Exception as e:
-            logging.error(f"Error processing {episode_path.name}: {e}")
+            logging.error(f"Failed to process task {task_id}: {e}")
             continue
-
-        if error_type:
-            # Always save a recovery trace for the first error episode,
-            # even if there are zero clean commands before the error
-            save_recovery_trace(episode_path, clean_commands, error_type)
-            save_points_created += 1
-            print(f"Stopping at episode {episode_path.name} due to error: {error_type}")
-            break
     
-    logging.info(f"Complete: {save_points_created}/{len(episodes)} save points created")
+    logging.info(f"\n{'='*60}")
+    logging.info(f"Complete: {save_points_created}/{len(TARGET_TASKS)} tasks had errors and were saved")
+    logging.info(f"{'='*60}")
 
 if __name__ == "__main__":
     main()
