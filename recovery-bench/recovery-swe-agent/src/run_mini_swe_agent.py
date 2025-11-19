@@ -70,6 +70,7 @@ def main():
     recovery_mode = args.recovery_mode
     run_id = args.run_id
     max_workers = args.max_workers
+    #return restore_docker_testing(cwd, trajectory_folder, model, run_id, recovery_mode, max_workers)
     return run_replay_agent_swe(cwd, trajectory_folder, model, run_id, recovery_mode, max_workers)
     
 if __name__ == "__main__":

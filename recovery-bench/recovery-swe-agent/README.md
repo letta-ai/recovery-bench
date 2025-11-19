@@ -20,7 +20,50 @@ Use pip to install mini-swe-agent in your current environment
 pip install mini-swe-agent
 ```
 
+### Install datasets
+Use pip install datasets in your current environment
+
+```bash
+pip install datasets
+```
+
 ## Quick Start
+
+### Generating trajectories
+Use command from toplevel to generate trajectories
+```bash
+python -m recovery-bench.recovery-swe-agent.src.generate_traces \
+  --dataset SWE-bench_Verified \
+  --num_trajs 10 \
+  --model openai/gpt-5-nano \
+  --subset verified \
+  --workers 4 \
+  --run_id 0.0.1 
+```
+
+After generating trajectories, add --clean to the command to parse for dirty states 
+and organize the dataset for the recovery agent to be ran
+
+```bash
+python -m recovery-bench.recovery-swe-agent.src.generate_traces \
+  --dataset SWE-bench_Verified \
+  --num_trajs 10 \
+  --model openai/gpt-5-nano \
+  --subset verified \
+  --workers 4 \
+  --run_id 0.0.1 \
+  --clean
+```
+
+### Options:
+- `--dataset`: Name of SWE Bench dataset (required)
+- `num_trajs`: Number of dirty states to generate (required)
+- `--model`: Model to use (required)
+- `--subset`: SWE Bench dataset subset (required)
+- `--run-id`: Custom run identifier (required)
+- `--workers`: Number of trajectories to run in parallel (optional, default = 1)
+- `--clean`: Boolean flag to indicate cleaning/organizing of freshly generate trajectories
+
 
 ### Run Mini SWE Recovery Agent
 Use command from toplevel directory
@@ -29,7 +72,7 @@ python -m recovery-bench.recovery-swe-agent.src.run_mini_swe_agent \
   --trajectory-folder recovery-bench/recovery-swe-agent/swe-runs \
   --model-name openai/gpt-5-mini \
   --run-id gpt-5-correction-1 \
-  --recovery-mode full_history
+  --recovery-mode environment_only
 ```
 
 For avaliable models, see [mini-swe-agent models](https://mini-swe-agent.com/latest/models/quickstart/)
@@ -43,6 +86,6 @@ For avaliable models, see [mini-swe-agent models](https://mini-swe-agent.com/lat
 
 
 ## TODOs:
-- [ ] Implement action_summary
-- [ ] Add trace generation capabilities along with trace formatting
-- [ ] Experiment with minisweagent prompt
+- [ ] Look into adversarial error injection after strong agent runs
+- [ ] Add compatibility for other SWE Bench datasets
+- [ ] Add comprehensive trajectory checks to ensure quality dirty states
