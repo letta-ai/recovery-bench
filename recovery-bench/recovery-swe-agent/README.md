@@ -1,6 +1,6 @@
 # Recovery-SWE-Agent
 
-Recovery-SWE-Agent is a wrapper for testing LLM agents' ability to recover from mistakes on SWE-bench tasks. This tool allows you to run replay/recovery agents on terminal-based software engineering tasks with partial execution states.
+Recovery-SWE-Agent is a wrapper for testing LLM agents' ability to recover from mistakes on SWE-bench tasks. This tool allows you to generate trajectories and run replay/recovery agents on terminal-based software engineering tasks with partial execution states.
 
 ## Setup
 
