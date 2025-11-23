@@ -20,19 +20,15 @@ import shutil
 import hashlib
 from pathlib import Path
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 
 # Use absolute paths for robustness
 BASE_DIR = Path(__file__).parent.resolve()
 BASE_RUNS_FOLDER = BASE_DIR / "runs/gpt-4o-mini-collected-20250714_232243"
 SAVE_POINTS_FOLDER = BASE_DIR / "save_points"
 
-# Tasks to process (can be modified or set to None to process all)
-TARGET_TASKS = [
-    "4ab82a39-chess-best-move",
-    "1e9d5280-parallelize-graph",
-    "0812d36d-npm-conflict-resolution"
-]
+# Tasks to process (set to None to process all tasks that don't have save points)
+TARGET_TASKS = None  # Will auto-detect tasks without save points
 
 # Regex for cheap pre-check (case-insensitive)
 # Captures common error indicators for the target types
@@ -55,8 +51,8 @@ def create_task_hash(task_description: str) -> str:
     return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
 
 
-def llm_check_error(output: str) -> tuple[bool, str]:
-    """Use LLM to detect if output contains one of the target error types and return error type."""
+def llm_check_error(output: str, openai_client: OpenAI) -> tuple[bool, str]:
+    """Use OpenAI API to detect if output contains one of the target error types and return error type."""
     
     prompt = f"""Does this terminal output contain an error? If yes, what type of error is it?
 
@@ -75,15 +71,17 @@ Respond with either:
 - The specific error type if there is a real error (e.g., "NameError", "TypeError", "AttributeError", "SyntaxError", "RuntimeError", etc.)"""
 
     try:
-        # Small delay to avoid rate limiting
-        time.sleep(0.1)
+        if not openai_client:
+            logging.warning("OpenAI client not available, cannot check for errors")
+            return False, ""
         
-        response = openai.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=50,
             temperature=0
         )
+        
         response_text = response.choices[0].message.content.strip()
         
         if "no error" in response_text.lower():
@@ -91,10 +89,10 @@ Respond with either:
         else:
             return True, response_text
     except Exception as e:
-        logging.error(f"LLM API call failed: {e}")
+        logging.error(f"OpenAI API call failed: {e}")
         return False, ""
 
-def is_target_error(output: str) -> tuple[bool, str]:
+def is_target_error(output: str, openai_client: OpenAI) -> tuple[bool, str]:
     """
     Combined check: uses regex for a fast filter, then uses LLM if necessary.
     Returns (is_error, error_type)
@@ -107,11 +105,11 @@ def is_target_error(output: str) -> tuple[bool, str]:
         return False, ""
 
     # Always use LLM to check for errors (excluding command not found and timeout)
-    return llm_check_error(output)
+    return llm_check_error(output, openai_client)
 
 # analyze trajectory
 
-def analyze_episode(episode_path: Path):
+def analyze_episode(episode_path: Path, openai_client: OpenAI):
     """
     Analyze one episode and return clean commands before first target error.
     Returns a tuple: (episode_path, clean_commands, error_type)
@@ -179,7 +177,7 @@ def analyze_episode(episode_path: Path):
 
     clean_commands = []
     for step in steps:
-        is_error, error_type = is_target_error(step["output"])
+        is_error, error_type = is_target_error(step["output"], openai_client)
         if is_error:
             logging.info(f"Error found in {episode_path.name}: {error_type}")
             print(f"Episode {episode_path.name}: Error Type - {error_type}")
@@ -245,7 +243,30 @@ def copy_episodes_for_replay(
     logging.info(f"Saved {episodes_copied} episodes (0-{error_episode_num}) for ReplayAgent in {traj_save_path}")
     return traj_save_path
 
-def process_task(task_id: str) -> bool:
+def get_tasks_without_savepoints() -> list:
+    """Get all task IDs from runs that don't have save points yet."""
+    all_tasks = set()
+    tasks_with_savepoints = set()
+    
+    # Get all tasks from runs directory
+    if BASE_RUNS_FOLDER.exists():
+        for task_dir in BASE_RUNS_FOLDER.iterdir():
+            if task_dir.is_dir() and not task_dir.name.startswith('.'):
+                all_tasks.add(task_dir.name)
+    
+    # Get all tasks that already have save points
+    if SAVE_POINTS_FOLDER.exists():
+        for task_dir in SAVE_POINTS_FOLDER.iterdir():
+            if task_dir.is_dir() and not task_dir.name.startswith('.'):
+                tasks_with_savepoints.add(task_dir.name)
+    
+    # Return tasks that don't have save points
+    tasks_to_process = sorted(list(all_tasks - tasks_with_savepoints))
+    logging.info(f"Found {len(all_tasks)} total tasks, {len(tasks_with_savepoints)} with save points, {len(tasks_to_process)} to process")
+    return tasks_to_process
+
+
+def process_task(task_id: str, openai_client: OpenAI) -> bool:
     """Process a single task and copy episodes for ReplayAgent. Returns True if error found."""
     task_path = BASE_RUNS_FOLDER / task_id
     if not task_path.exists():
@@ -285,7 +306,7 @@ def process_task(task_id: str) -> bool:
     # Sequentially process episodes; stop at the first episode containing an error
     for idx, episode_path in enumerate(episodes):
         try:
-            _, clean_commands, error_type = analyze_episode(episode_path)
+            _, clean_commands, error_type = analyze_episode(episode_path, openai_client)
         except Exception as e:
             logging.error(f"Error processing {episode_path.name}: {e}")
             continue
@@ -317,39 +338,39 @@ def main():
     if not api_key:
         logging.error("OPENAI_API_KEY not set in environment variables.")
         return
-    logging.info("API key loaded")
-    SAVE_POINTS_FOLDER.mkdir(exist_ok=True)
-    openai.api_key = api_key
     
+    logging.info("Initializing OpenAI client...")
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "Hello"}],
-            max_tokens=3,
-            temperature=0
-        )
-        logging.info("LLM connection successful")
+        openai_client = OpenAI(api_key=api_key)
+        logging.info("OpenAI client initialized successfully")
     except Exception as e:
-        logging.error(f"LLM connection failed: {e}")
+        logging.error(f"Failed to initialize OpenAI client: {e}")
         return
     
-    if not TARGET_TASKS:
-        logging.error("No tasks specified in TARGET_TASKS")
-        return
+    SAVE_POINTS_FOLDER.mkdir(exist_ok=True)
     
-    logging.info(f"Processing {len(TARGET_TASKS)} task(s): {TARGET_TASKS}")
+    # Determine which tasks to process
+    if TARGET_TASKS is None:
+        tasks_to_process = get_tasks_without_savepoints()
+        if not tasks_to_process:
+            logging.info("No tasks to process - all tasks already have save points")
+            return
+    else:
+        tasks_to_process = TARGET_TASKS
+    
+    logging.info(f"Processing {len(tasks_to_process)} task(s)")
     
     save_points_created = 0
-    for task_id in TARGET_TASKS:
+    for task_id in tasks_to_process:
         try:
-            if process_task(task_id):
+            if process_task(task_id, openai_client):
                 save_points_created += 1
         except Exception as e:
             logging.error(f"Failed to process task {task_id}: {e}")
             continue
     
     logging.info(f"\n{'='*60}")
-    logging.info(f"Complete: {save_points_created}/{len(TARGET_TASKS)} tasks had errors and were saved")
+    logging.info(f"Complete: {save_points_created}/{len(tasks_to_process)} tasks had errors and were saved")
     logging.info(f"{'='*60}")
 
 if __name__ == "__main__":
