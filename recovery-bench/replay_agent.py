@@ -1,162 +1,271 @@
+"""
+ReplayAgent for Harbor/Terminal-Bench 2.0
+
+This module provides replay agents that can recover from failed trajectories.
+The agents read previous failed trajectories, replay the commands to restore
+the environment state, and then continue with fresh attempts.
+
+Three variants are provided:
+- ReplayAgent: Full message history recovery
+- ReplayAgentWithoutMessages: Environment-only recovery  
+- ReplayAgentWithMessageSummaries: Summarized history recovery
+"""
+
 from pathlib import Path
 import os
 import json
-import shutil
-
-# or AbstractInstalledAgent if your agent is accessible as a package
-
-from terminal_bench import BaseAgent
-from terminal_bench.terminal.tmux_session import TmuxSession
-from terminal_bench.agents.terminus_1 import Terminus, Command, CommandBatchResponse
-from terminal_bench.llms.chat import Chat
-from terminal_bench.agents.failure_mode import FailureMode
-from terminal_bench.agents.base_agent import AgentResult
-from .utils import create_task_hash
 from abc import ABC, abstractmethod
+from typing import Optional
+import asyncio
+
+# Harbor imports
+from harbor.agents.base import BaseAgent
+from harbor.models.environment.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
+
+# LiteLLM for LLM calls
+import litellm
+
+
+def create_task_hash(task_description: str) -> str:
+    """Create 8-character hash from task description."""
+    import hashlib
+    return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
+
+
+class Command:
+    """Represents a terminal command to execute."""
+    def __init__(self, keystrokes: str, is_blocking: bool = True, timeout_sec: int = 120):
+        self.keystrokes = keystrokes
+        self.is_blocking = is_blocking
+        self.timeout_sec = timeout_sec
 
 
 class ReplayABC(ABC):
+    """Abstract base class for replay functionality."""
+    
     @abstractmethod
-    def _replay_environment(
-        self, session: TmuxSession, commands: list[Command]
-    ) -> str:
+    def _replay_environment(self, environment: BaseEnvironment, commands: list[Command]) -> str:
         pass
 
     @abstractmethod
-    def _add_messages(self, messages) -> None:
+    def _add_messages(self, messages: list[dict]) -> None:
         pass
 
     @abstractmethod
     def _read_trajectories(
-        self, task_description: str, logging_dir: Path | None = None
+        self, task_description: str, logging_dir: Optional[Path] = None
     ) -> tuple[list[Command], list[dict], int]:
         pass
 
 
-class ReplayAgent(Terminus, ReplayABC):
+class ReplayAgent(BaseAgent, ReplayABC):
+    """
+    Replay agent that recovers from failed trajectories.
+    
+    This agent reads a previous failed trajectory, replays all commands to
+    restore the environment state, and then continues with the full message
+    history, prompting the model to try a different approach.
+    """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, model_name: str = "anthropic/claude-sonnet-4-20250514", **kwargs):
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
+        self._model_name = model_name
+        self._max_episodes = 50
+        self._messages: list[dict] = []
+        
+        # System prompt for the recovery agent
+        self._system_prompt = """You are an AI assistant tasked with completing terminal-based tasks.
+You have access to a terminal session where you can execute commands.
+
+When given a task:
+1. Analyze the current terminal state
+2. Plan your approach
+3. Execute commands one at a time
+4. Check the results before proceeding
+
+Respond with a JSON object containing:
+{
+    "analysis": "Your analysis of the current state",
+    "plan": "Your plan for the next steps", 
+    "commands": [{"keystrokes": "command to run", "is_blocking": true, "timeout_sec": 120}],
+    "is_task_complete": false
+}
+
+Set is_task_complete to true when you believe the task is finished.
+"""
 
     @staticmethod
     def name() -> str:
         return "replay-agent"
 
-    def _add_messages(self, messages) -> None:
-        if self._include_messages:
-            self._messages = messages
-        else:
-            self._messages = []
+    def version(self) -> str | None:
+        return "2.0.0"
 
-    def perform_task(
+    async def setup(self, environment: BaseEnvironment) -> None:
+        """Setup the agent environment."""
+        pass
+
+    async def run(
         self,
         instruction: str,
-        session: TmuxSession,
-        logging_dir: Path | None = None,
-    ) -> AgentResult:
-
-        session._disable_recording = True
-        commands, messages, n_episodes = self._read_trajectories(
-            instruction, logging_dir
-        )
-
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """
+        Run the replay agent.
+        
+        1. Read trajectories from the failed attempt
+        2. Replay commands to restore environment state
+        3. Continue with agent loop for recovery
+        """
+        # Read previous trajectories
+        commands, messages, n_episodes = self._read_trajectories(instruction)
+        
         if len(commands) == 0:
-            raise Exception(f"No commands found for task")
+            context.add_log("No commands found in trajectory, starting fresh")
+            commands = []
+            messages = []
+            n_episodes = 0
 
-        last_pane_output = self._replay_environment(session, commands)
+        # Replay commands to restore environment state
+        last_output = await self._replay_environment_async(environment, commands)
+        context.add_log(f"Replayed {len(commands)} commands from previous trajectory")
 
-        # Create fresh chat and run agent loop
-        chat = Chat(self._llm)
+        # Set up messages for recovery
         self._add_messages(messages)
-        chat._messages = self._messages
-
+        
+        # Create the recovery prompt
         if self._include_messages:
-            initial_prompt = (
-                last_pane_output
-                + "\n\n"
-                + "Previous attempts failed! Please try again with different approaches."
+            recovery_prompt = (
+                f"Current terminal state:\n{last_output}\n\n"
+                "Previous attempts failed! Please try again with different approaches."
             )
         else:
-            initial_prompt = (
-                self._prompt_template.format(
-                    response_schema=self._response_schema,
-                    instruction=instruction,
-                    history="",
-                    terminal_state=last_pane_output,
-                )
-                + "\n\n"
-                + "Previous attempts failed! Please try again with different approaches."
+            recovery_prompt = (
+                f"{self._system_prompt}\n\n"
+                f"Task: {instruction}\n\n"
+                f"Current terminal state:\n{last_output}\n\n"
+                "Previous attempts failed! Please try again with different approaches."
             )
 
-        self._run_agent_loop(initial_prompt, session, chat, n_episodes, logging_dir)
-
-        return AgentResult(
-            total_input_tokens=chat.total_input_tokens,
-            total_output_tokens=chat.total_output_tokens,
-            failure_mode=FailureMode.NONE,
-            timestamped_markers=self._timestamped_markers,
+        # Run the agent loop
+        await self._run_agent_loop(
+            recovery_prompt,
+            instruction,
+            environment,
+            context,
+            n_episodes
         )
 
-    def _read_episode_response(self, episode_dir: Path) -> CommandBatchResponse | None:
-        """Helper method to read and parse response.json from an episode directory."""
-        response_file = episode_dir / "response.json"
-        if response_file.exists():
-            try:
-                response_content = response_file.read_text()
-                return CommandBatchResponse.model_validate_json(response_content)
-            except Exception:
-                pass
-        return None
+    def _add_messages(self, messages: list[dict]) -> None:
+        """Add messages to the conversation history."""
+        if self._include_messages:
+            self._messages = [{"role": "system", "content": self._system_prompt}]
+            self._messages.extend(messages)
+        else:
+            self._messages = [{"role": "system", "content": self._system_prompt}]
 
-    def _find_trajectory_folder(self, task_hash: str) -> Path | None:
-        """Find the trajectory folder based on task hash.
-
-        The structure is nested: hash-task_name/task_name.1-of-1/
-        We don't know the task_name, so we find the one that matches the task_hash.
+    def _find_trajectory_folder(self, task_hash: str) -> Optional[Path]:
+        """
+        Find the trajectory folder based on task hash.
+        
+        Supports both old format (hash-task_name/task_name.1-of-1/) 
+        and new ATIF format (run_dir/task_name/).
         """
         base_path = Path(self._base_folder)
-        trajectory_base = None
-
-        # Find directory that starts with task_hash-
-        for item in base_path.iterdir():
-            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
-                trajectory_base = item
-                break
-
-        if trajectory_base is None:
+        
+        if not base_path.exists():
             return None
 
-        # Find the nested subdirectory structure
-        trajectory_folder = None
-        for subdir in trajectory_base.iterdir():
-            if subdir.is_dir():
-                if "1-of-1" in subdir.name:
-                    trajectory_folder = subdir
-                    break
+        # Try old format: hash-prefixed directories
+        for item in base_path.iterdir():
+            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
+                # Find nested subdirectory
+                for subdir in item.iterdir():
+                    if subdir.is_dir() and "1-of-1" in subdir.name:
+                        return subdir
+                return item
 
-        return trajectory_folder
+        # Try new ATIF format: direct task directories
+        for item in base_path.iterdir():
+            if item.is_dir():
+                trajectory_file = item / "trajectory.json"
+                if trajectory_file.exists():
+                    return item
+
+        return None
 
     def _read_trajectories(
-        self, task_description: str, logging_dir: Path | None = None
+        self, task_description: str, logging_dir: Optional[Path] = None
     ) -> tuple[list[Command], list[dict], int]:
-        """Read commands from all episode response.json files and messages from last episode."""
+        """
+        Read commands and messages from trajectory files.
+        
+        Supports both old episode-based format and new ATIF format.
+        """
         task_hash = create_task_hash(task_description)
-
         trajectory_folder = self._find_trajectory_folder(task_hash)
 
         if trajectory_folder is None:
             return [], [], 0
 
+        # Check for ATIF format (trajectory.json)
+        atif_file = trajectory_folder / "trajectory.json"
+        if atif_file.exists():
+            return self._read_atif_trajectory(atif_file)
+
+        # Fall back to old episode-based format
         agent_logs_dir = trajectory_folder / "agent-logs"
-        if not agent_logs_dir.exists():
+        if agent_logs_dir.exists():
+            return self._read_episode_trajectory(agent_logs_dir)
+
+        return [], [], 0
+
+    def _read_atif_trajectory(self, trajectory_file: Path) -> tuple[list[Command], list[dict], int]:
+        """Read trajectory from ATIF format."""
+        try:
+            with open(trajectory_file, "r") as f:
+                trajectory = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
             return [], [], 0
 
         commands = []
         messages = []
+        n_episodes = 0
 
-        # Find all episode directories and sort them numerically
+        for step in trajectory:
+            role = step.get("role", "")
+            content = step.get("content", "")
+            
+            if role == "assistant":
+                n_episodes += 1
+                # Parse command batch from assistant response
+                try:
+                    response = json.loads(content) if isinstance(content, str) else content
+                    if "commands" in response:
+                        for cmd in response["commands"]:
+                            commands.append(Command(
+                                keystrokes=cmd.get("keystrokes", ""),
+                                is_blocking=cmd.get("is_blocking", True),
+                                timeout_sec=cmd.get("timeout_sec", 120)
+                            ))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            # Add to messages for context
+            if role in ["user", "assistant", "system"]:
+                messages.append({"role": role, "content": content})
+
+        return commands, messages, n_episodes
+
+    def _read_episode_trajectory(self, agent_logs_dir: Path) -> tuple[list[Command], list[dict], int]:
+        """Read trajectory from old episode-based format."""
+        commands = []
+        messages = []
+
+        # Find all episode directories
         episode_dirs = []
         for item in agent_logs_dir.iterdir():
             if item.is_dir() and item.name.startswith("episode-"):
@@ -166,149 +275,185 @@ class ReplayAgent(Terminus, ReplayABC):
                 except ValueError:
                     continue
 
-        if logging_dir is not None:
-            # copy the contents of agent-logs directory directly to logging_dir
-            # Create target directory
-            logging_dir.mkdir(parents=True, exist_ok=True)
-
-            # Copy each item from source to target
-            for item in agent_logs_dir.iterdir():
-                target_path = logging_dir / item.name
-                if item.is_dir():
-                    if target_path.exists():
-                        shutil.rmtree(target_path)
-                    shutil.copytree(item, target_path)
-                else:
-                    shutil.copy2(item, target_path)
-
-            # create a file indicting how many episodes have been replayed
-            (logging_dir / "episodes_replayed.txt").write_text(
-                f"replayed {len(episode_dirs)} episodes from {agent_logs_dir}"
-            )
-
-        # Sort by episode number
         episode_dirs.sort(key=lambda x: x[0])
 
-        # Read commands from each episode's response.json using helper method
+        # Read commands from each episode
         for episode_num, episode_dir in episode_dirs:
-            parsed_response = self._read_episode_response(episode_dir)
-            if parsed_response:
-                commands.extend(parsed_response.commands)
+            response_file = episode_dir / "response.json"
+            if response_file.exists():
+                try:
+                    with open(response_file, "r") as f:
+                        response = json.load(f)
+                    if "commands" in response:
+                        for cmd in response["commands"]:
+                            commands.append(Command(
+                                keystrokes=cmd.get("keystrokes", ""),
+                                is_blocking=cmd.get("is_blocking", True),
+                                timeout_sec=cmd.get("timeout_sec", 120)
+                            ))
+                except (json.JSONDecodeError, FileNotFoundError):
+                    pass
 
-        last_episode_dir = episode_dirs[-1][1]
-
-        debug_file = last_episode_dir / "debug.json"
-        if debug_file.exists():
-            try:
-                with open(debug_file, "r") as f:
-                    debug_data = json.load(f)
-                if "input" in debug_data and isinstance(debug_data["input"], list):
-                    messages = debug_data["input"]
-            except Exception:
-                pass
-
-        # Add the last assistant response using helper method
-        parsed_response = self._read_episode_response(last_episode_dir)
-        if parsed_response:
-            parsed_response.is_task_complete = False
-
-        if parsed_response:
-            assistant_message = {
-                "role": "assistant",
-                "content": parsed_response.model_dump_json(),
-            }
-            messages.append(assistant_message)
-
-        messages = self._clean_debug_messages(messages)
+        # Read messages from the last episode's debug.json
+        if episode_dirs:
+            last_episode_dir = episode_dirs[-1][1]
+            debug_file = last_episode_dir / "debug.json"
+            if debug_file.exists():
+                try:
+                    with open(debug_file, "r") as f:
+                        debug_data = json.load(f)
+                    if "input" in debug_data and isinstance(debug_data["input"], list):
+                        messages = self._clean_debug_messages(debug_data["input"])
+                except (json.JSONDecodeError, FileNotFoundError):
+                    pass
 
         return commands, messages, len(episode_dirs)
 
-    def _replay_environment(
-        self, session: TmuxSession, commands: list[Command]
+    def _clean_debug_messages(self, messages: list[dict]) -> list[dict]:
+        """Clean debug messages by extracting text content."""
+        cleaned = []
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Extract text from content list
+                text_parts = [item.get("text", "") for item in content if isinstance(item, dict)]
+                content = "\n".join(text_parts)
+            cleaned.append({"role": msg.get("role", "user"), "content": content})
+        return cleaned
+
+    def _replay_environment(self, environment: BaseEnvironment, commands: list[Command]) -> str:
+        """Synchronous wrapper for replay (for compatibility)."""
+        return asyncio.get_event_loop().run_until_complete(
+            self._replay_environment_async(environment, commands)
+        )
+
+    async def _replay_environment_async(
+        self, environment: BaseEnvironment, commands: list[Command]
     ) -> str:
-        """Send commands sequentially to session."""
-        try:
-            _, result = self._execute_commands(commands, session)
-        except Exception as e:
-            print(f"Error executing commands: {e}")
-            print(f"Commands: {commands}")
-            print(f"Session: {session}")
-            raise e
-        return result
-    
-
-    def _execute_commands(
-        self,
-        commands: list[Command],
-        session: TmuxSession,
-    ) -> tuple[bool, str]:
-        """Execute a batch of commands in the terminal.
-
-        Args:
-            commands: List of commands to execute
-            session: TmuxSession instance
-
-        Returns:
-            Tuple of (timeout_occurred, terminal_output)
-        """
+        """Replay commands in the environment to restore state."""
+        last_output = ""
+        
         for command in commands:
             try:
-                session.send_keys(
-                    command.keystrokes,
-                    block=command.is_blocking
-                    and not (
-                        command.keystrokes.strip().endswith("EOF")
-                        or command.keystrokes.strip().endswith("&")
-                    ),
-                    max_timeout_sec=command.timeout_sec,
+                result = await environment.exec(
+                    command=command.keystrokes,
+                    timeout_sec=command.timeout_sec
                 )
-            except TimeoutError:
-                # We do not care about timeout errors, just keep sending commands
+                last_output = result.stdout if result else ""
+            except asyncio.TimeoutError:
+                # Continue even on timeout (like old behavior)
+                continue
+            except Exception as e:
+                # Log but continue
                 continue
 
-        return False, session.capture_pane()
+        # Capture final terminal state
+        try:
+            result = await environment.exec("tmux capture-pane -p")
+            last_output = result.stdout if result else last_output
+        except Exception:
+            pass
 
+        return last_output
 
-    def _run_agent_loop(
+    async def _run_agent_loop(
         self,
         initial_prompt: str,
-        session: TmuxSession,
-        chat: Chat,
-        n_episodes: int,
-        logging_dir: Path | None = None,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+        start_episode: int = 0
     ) -> None:
-        """n_episodes is the starting episode number (episode so far)"""
-        prompt = initial_prompt
-
-        for episode in range(n_episodes, n_episodes + self._max_episodes):
-            logging_paths = self._setup_episode_logging(logging_dir, episode)
-
-            parsed_response = self._handle_llm_interaction(chat, prompt, logging_paths)
-            self._record_asciinema_marker(parsed_response.model_dump_json(), session)
-
-            timeout_occurred, terminal_output = self._execute_commands(
-                parsed_response.commands, session
-            )
-
-            if parsed_response.is_task_complete:
+        """Run the main agent loop for recovery."""
+        
+        # Add initial prompt to messages
+        self._messages.append({"role": "user", "content": initial_prompt})
+        
+        for episode in range(start_episode, start_episode + self._max_episodes):
+            # Call LLM
+            try:
+                response = await litellm.acompletion(
+                    model=self._model_name,
+                    messages=self._messages,
+                    temperature=0.7,
+                )
+                assistant_content = response.choices[0].message.content
+            except Exception as e:
+                context.add_log(f"LLM error: {e}")
                 break
 
-            prompt = terminal_output
+            # Add assistant response to messages
+            self._messages.append({"role": "assistant", "content": assistant_content})
+            
+            # Log the response
+            context.add_step(
+                action=assistant_content,
+                observation="",
+            )
 
-    def _clean_debug_messages(self, messages: list[dict]) -> list[dict]:
-        """Clean debug messages from the messages list."""
-        new_messages = []
-        for message in messages:
-            if isinstance(message["content"], list):
-                new_messages.append(
-                    {"role": message["role"], "content": message["content"][0]["text"]}
-                )
-            else:
-                new_messages.append(message)
-        return new_messages
+            # Parse response
+            try:
+                parsed = json.loads(assistant_content)
+            except json.JSONDecodeError:
+                # Try to extract JSON from response
+                try:
+                    import re
+                    json_match = re.search(r'\{.*\}', assistant_content, re.DOTALL)
+                    if json_match:
+                        parsed = json.loads(json_match.group())
+                    else:
+                        parsed = {"commands": [], "is_task_complete": False}
+                except:
+                    parsed = {"commands": [], "is_task_complete": False}
+
+            # Check if task is complete
+            if parsed.get("is_task_complete", False):
+                context.add_log("Agent reported task complete")
+                break
+
+            # Execute commands
+            commands = parsed.get("commands", [])
+            terminal_output = ""
+            
+            for cmd_data in commands:
+                keystrokes = cmd_data.get("keystrokes", "")
+                timeout = cmd_data.get("timeout_sec", 120)
+                
+                try:
+                    result = await environment.exec(
+                        command=keystrokes,
+                        timeout_sec=timeout
+                    )
+                    terminal_output = result.stdout if result else ""
+                except asyncio.TimeoutError:
+                    terminal_output = "[Command timed out]"
+                except Exception as e:
+                    terminal_output = f"[Error: {e}]"
+
+            # Capture terminal state
+            try:
+                result = await environment.exec("tmux capture-pane -p")
+                terminal_output = result.stdout if result else terminal_output
+            except Exception:
+                pass
+
+            # Update context with observation
+            if context._steps:
+                context._steps[-1].observation = terminal_output
+
+            # Add terminal output to messages for next iteration
+            self._messages.append({"role": "user", "content": terminal_output})
 
 
 class ReplayAgentWithoutMessages(ReplayAgent):
+    """
+    Replay agent that only restores environment state.
+    
+    This variant replays commands to restore the environment but does NOT
+    include the previous conversation history. The model sees only the
+    corrupted environment and the original task.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._include_messages = False
@@ -317,18 +462,48 @@ class ReplayAgentWithoutMessages(ReplayAgent):
     def name() -> str:
         return "replay-agent-without-messages"
 
+
 class ReplayAgentWithMessageSummaries(ReplayAgent):
+    """
+    Replay agent that uses summarized message history.
+    
+    This variant replays commands and provides a summary of the previous
+    conversation instead of the full history. This tests whether a
+    compressed view of history helps recovery.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._include_messages = True
 
-    def _add_messages(self, messages) -> None:
-        # create a summary of the messages and add it to message list
-        chat = Chat(self._llm)
-        chat._messages = messages
-        summary = chat.chat(
-            "Please summarize the all previous interactions with the terminal. "
-            "The summary should be concise and to the point. "
-            "Summary:"
-        )
-        self._messages = [messages[0]] + [{"role": "assistant", "content": summary}]
+    @staticmethod
+    def name() -> str:
+        return "replay-agent-with-summaries"
+
+    def _add_messages(self, messages: list[dict]) -> None:
+        """Create a summary of messages instead of using full history."""
+        if not messages:
+            self._messages = [{"role": "system", "content": self._system_prompt}]
+            return
+
+        # Create a summary using the LLM
+        summary_messages = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes conversations."},
+            {"role": "user", "content": f"Please summarize the following conversation concisely:\n\n{json.dumps(messages, indent=2)}"}
+        ]
+        
+        try:
+            # Use sync call for summary (runs during setup)
+            response = litellm.completion(
+                model=self._model_name,
+                messages=summary_messages,
+                temperature=0.3,
+            )
+            summary = response.choices[0].message.content
+        except Exception:
+            summary = "Previous attempts to complete this task failed."
+
+        self._messages = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "assistant", "content": f"Summary of previous attempts:\n{summary}"}
+        ]
