@@ -2,21 +2,19 @@
 """
 Run replay/recovery agent.
 
-This script runs the replay agent on collected traces for recovery-bench.
+This script runs the replay agent on traces for recovery-bench.
 
-Usage: python -m self_correction.run_replay_agent --trajectory-folder FOLDER --model-name MODEL
-Example: python -m self_correction.run_replay_agent --trajectory-folder runs/collected --model-name anthropic/claude-sonnet-4-20250514
+Usage: python -m recovery_bench.run_replay_agent --trajectory-folder FOLDER --model-name MODEL
+Example: python -m recovery_bench.run_replay_agent --trajectory-folder jobs/initial-gpt-4o-mini-* --model-name anthropic/claude-sonnet-4-20250514
 """
 
 import argparse
-from datetime import datetime
 import sys
 from pathlib import Path
 
 from .utils import (
     get_unsolved_tasks,
     reorganize_directories,
-    reverse_reorganize_directories,
     run_replay_agent_tb,
 )
 
@@ -40,26 +38,20 @@ def main():
     parser.add_argument(
         "--dataset-name",
         type=str,
-        default="terminal-bench-core",
+        default="terminal-bench",
         help="Name of the dataset",
     )
     parser.add_argument(
-        "--dataset-version", type=str, default="0.2.15", help="Version of the dataset"
+        "--dataset-version", type=str, default="2.0", help="Version of the dataset"
     )
     parser.add_argument(
         "--agent-import-path",
         type=str,
-        default="recovery-bench.replay_agent:ReplayAgent",
+        default="recovery_bench.replay_agent:ReplayAgent",
         help="Import path for the agent",
     )
     parser.add_argument(
         "--n-concurrent", type=int, default=6, help="Number of concurrent processes"
-    )
-    parser.add_argument(
-        "--task-folder",
-        type=str,
-        default="./terminal-bench/tasks",
-        help="Path to the task folder for reorganization",
     )
     parser.add_argument(
         "--cleanup-container",
@@ -89,10 +81,8 @@ def main():
         else args.task_ids
     )
 
-    # Use task_folder if provided, otherwise use None to rely on environment variable
-    task_folder = args.task_folder if args.task_folder else None
-    reverse_reorganize_directories(args.trajectory_folder)
-    reorganize_directories(args.trajectory_folder, task_folder)
+    # Reorganize directories with hash prefixes
+    reorganize_directories(args.trajectory_folder)
 
     if not task_ids:
         print("No unsolved task IDs found")
