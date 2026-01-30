@@ -258,7 +258,8 @@ def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
             terminal_marker = "\n\nCurrent terminal state:"
             if terminal_marker in task_part:
                 task_part = task_part.split(terminal_marker, 1)[0]
-            return task_part.strip()
+            # Keep trailing newline to match raw instruction format
+            return task_part
         
         return full_message
     except (json.JSONDecodeError, FileNotFoundError):
