@@ -166,24 +166,49 @@ Set is_task_complete to true when you believe the task is finished.
         else:
             self._messages = [{"role": "system", "content": self._system_prompt}]
 
-    def _find_trajectory_folder(self, task_hash: str) -> Optional[Path]:
-        """Find the trajectory folder based on task hash prefix."""
+    def _find_trajectory_folder(self, task_description: str) -> Optional[Path]:
+        """Find the trajectory folder by task name or hash."""
         base_path = Path(self._base_folder)
         
         if not base_path.exists():
             return None
 
-        # Look for hash-prefixed directories (format: <hash>-<task-id>/)
+        # Extract task name from instruction (usually first line or after "Task:")
+        task_name = None
+        for line in task_description.split('\n'):
+            # Common patterns: "Task: X" or just the task name
+            if line.strip().startswith("Task:"):
+                task_name = line.split(":", 1)[1].strip().split()[0]
+                break
+        
+        # Search all directories
         for item in base_path.iterdir():
-            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
-                # Check agent/ subdirectory (Harbor output structure)
-                trajectory_file = item / "agent" / "trajectory.json"
-                if trajectory_file.exists():
-                    return item
-                # Fall back to direct path
+            if not item.is_dir():
+                continue
+                
+            # Check if trajectory exists
+            trajectory_file = item / "agent" / "trajectory.json"
+            if not trajectory_file.exists():
                 trajectory_file = item / "trajectory.json"
-                if trajectory_file.exists():
-                    return item
+            if not trajectory_file.exists():
+                continue
+            
+            # Check result.json for task_name match
+            result_file = item / "result.json"
+            if result_file.exists():
+                try:
+                    with open(result_file, "r") as f:
+                        result = json.load(f)
+                    stored_task_name = result.get("task_name", "")
+                    # Match if task_name appears in the instruction
+                    if stored_task_name and stored_task_name in task_description:
+                        return item
+                except (json.JSONDecodeError, FileNotFoundError):
+                    pass
+            
+            # Fallback: check folder name contains task name pattern
+            if task_name and task_name in item.name:
+                return item
 
         return None
 
@@ -191,8 +216,7 @@ Set is_task_complete to true when you believe the task is finished.
         self, task_description: str, logging_dir: Optional[Path] = None
     ) -> tuple[list[Command], list[dict], int]:
         """Read commands and messages from ATIF trajectory file."""
-        task_hash = create_task_hash(task_description)
-        trajectory_folder = self._find_trajectory_folder(task_hash)
+        trajectory_folder = self._find_trajectory_folder(task_description)
 
         if trajectory_folder is None:
             return [], [], 0
