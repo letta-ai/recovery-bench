@@ -203,8 +203,8 @@ Set is_task_complete to true when you believe the task is finished.
         }
         
         # Use logs_dir passed to agent (not container path)
-        if self._logs_dir:
-            trajectory_path = Path(self._logs_dir) / "trajectory.json"
+        if self.logs_dir:
+            trajectory_path = Path(self.logs_dir) / "trajectory.json"
         else:
             trajectory_path = Path("trajectory.json")
             
