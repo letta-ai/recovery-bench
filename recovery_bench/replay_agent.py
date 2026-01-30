@@ -22,6 +22,7 @@ import asyncio
 from harbor import BaseAgent, BaseEnvironment, AgentContext
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.models.trial.paths import EnvironmentPaths
+from datetime import datetime, timezone
 
 # LiteLLM for LLM calls
 import litellm
@@ -76,6 +77,8 @@ class ReplayAgent(BaseAgent, ReplayABC):
         self._max_episodes = 50
         self._messages: list[dict] = []
         self._session: TmuxSession | None = None
+        self._trajectory_steps: list[dict] = []
+        self._step_counter = 0
         
         # System prompt for the recovery agent
         self._system_prompt = """You are an AI assistant tasked with completing terminal-based tasks.
@@ -159,6 +162,9 @@ Set is_task_complete to true when you believe the task is finished.
                 "Previous attempts failed! Please try again with different approaches."
             )
 
+        # Record initial user message
+        self._add_trajectory_step("user", recovery_prompt)
+        
         # Run the agent loop
         await self._run_agent_loop(
             recovery_prompt,
@@ -167,6 +173,42 @@ Set is_task_complete to true when you believe the task is finished.
             context,
             n_episodes
         )
+        
+        # Save trajectory
+        self._save_trajectory()
+
+    def _add_trajectory_step(self, source: str, message: str, tool_calls: list = None) -> None:
+        """Add a step to the trajectory."""
+        self._step_counter += 1
+        step = {
+            "step_id": self._step_counter,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": source,
+            "message": message,
+        }
+        if tool_calls:
+            step["tool_calls"] = tool_calls
+        self._trajectory_steps.append(step)
+    
+    def _save_trajectory(self) -> None:
+        """Save trajectory to ATIF format JSON file."""
+        trajectory = {
+            "schema_version": "ATIF-v1.5",
+            "agent": {
+                "name": self.name(),
+                "version": self.version(),
+                "model_name": self._model_name,
+            },
+            "steps": self._trajectory_steps,
+        }
+        
+        trajectory_path = EnvironmentPaths.agent_dir / "trajectory.json"
+        try:
+            with open(trajectory_path, "w") as f:
+                json.dump(trajectory, f, indent=2)
+            print(f"Trajectory saved to {trajectory_path}")
+        except Exception as e:
+            print(f"Failed to save trajectory: {e}")
 
     def _add_messages(self, messages: list[dict]) -> None:
         """Add messages to the conversation history."""
@@ -339,6 +381,9 @@ Set is_task_complete to true when you believe the task is finished.
             
             # Log the response
             print(f"Agent response: {assistant_content[:200]}...")
+            
+            # Record agent step in trajectory
+            self._add_trajectory_step("agent", assistant_content)
 
             # Parse response
             try:
@@ -389,10 +434,11 @@ Set is_task_complete to true when you believe the task is finished.
             print(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
 
             # Add terminal output to messages for next iteration (avoid empty content)
-            if terminal_output.strip():
-                self._messages.append({"role": "user", "content": terminal_output})
-            else:
-                self._messages.append({"role": "user", "content": "(No output)"})
+            observation = terminal_output.strip() if terminal_output.strip() else "(No output)"
+            self._messages.append({"role": "user", "content": observation})
+            
+            # Record observation in trajectory
+            self._add_trajectory_step("user", observation)
 
 
 class ReplayAgentWithoutMessages(ReplayAgent):
