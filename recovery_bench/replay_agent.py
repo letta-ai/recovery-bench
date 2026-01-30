@@ -20,6 +20,8 @@ import asyncio
 
 # Harbor imports
 from harbor import BaseAgent, BaseEnvironment, AgentContext
+from harbor.agents.terminus_2.tmux_session import TmuxSession
+from harbor.models.trial.paths import EnvironmentPaths
 
 # LiteLLM for LLM calls
 import litellm
@@ -73,6 +75,7 @@ class ReplayAgent(BaseAgent, ReplayABC):
         self._model_name = model_name
         self._max_episodes = 50
         self._messages: list[dict] = []
+        self._session: TmuxSession | None = None
         
         # System prompt for the recovery agent
         self._system_prompt = """You are an AI assistant tasked with completing terminal-based tasks.
@@ -103,8 +106,15 @@ Set is_task_complete to true when you believe the task is finished.
         return "2.0.0"
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        """Setup the agent environment."""
-        pass
+        """Setup the agent environment with TmuxSession."""
+        self._session = TmuxSession(
+            session_name=self.name(),
+            environment=environment,
+            logging_path=EnvironmentPaths.agent_dir / "replay_agent.pane",
+            local_asciinema_recording_path=None,
+            remote_asciinema_recording_path=None,
+        )
+        await self._session.start()
 
     async def run(
         self,
@@ -271,31 +281,32 @@ Set is_task_complete to true when you believe the task is finished.
     async def _replay_environment_async(
         self, environment: BaseEnvironment, commands: list[Command]
     ) -> str:
-        """Replay commands in the environment to restore state."""
-        last_output = ""
+        """Replay commands in the environment to restore state using TmuxSession."""
+        if not self._session:
+            print("Warning: TmuxSession not initialized, cannot replay")
+            return ""
         
         for command in commands:
             try:
-                result = await environment.exec(
-                    command=command.keystrokes,
-                    timeout_sec=command.timeout_sec
+                # Use TmuxSession.send_keys like terminus-2 does
+                await self._session.send_keys(
+                    keys=command.keystrokes,
+                    min_timeout_sec=0.5,
+                    max_timeout_sec=float(command.timeout_sec),
                 )
-                last_output = result.stdout if result else ""
             except asyncio.TimeoutError:
-                # Continue even on timeout (like old behavior)
+                # Continue even on timeout
                 continue
             except Exception as e:
-                # Log but continue
+                print(f"Replay error: {e}")
                 continue
 
-        # Capture final terminal state
+        # Get final terminal state
         try:
-            result = await environment.exec("tmux capture-pane -p")
-            last_output = result.stdout if result else last_output
+            last_output = await self._session.get_visible_pane()
+            return last_output or ""
         except Exception:
-            pass
-
-        return last_output
+            return ""
 
     async def _run_agent_loop(
         self,
@@ -349,31 +360,30 @@ Set is_task_complete to true when you believe the task is finished.
                 print("Agent reported task complete")
                 break
 
-            # Execute commands
+            # Execute commands using TmuxSession
             commands = parsed.get("commands", [])
-            terminal_output = ""
             
             for cmd_data in commands:
                 keystrokes = cmd_data.get("keystrokes", "")
-                timeout = cmd_data.get("timeout_sec", 120)
+                duration = cmd_data.get("duration", cmd_data.get("timeout_sec", 1.0))
                 
-                try:
-                    result = await environment.exec(
-                        command=keystrokes,
-                        timeout_sec=timeout
-                    )
-                    terminal_output = result.stdout if result else ""
-                except asyncio.TimeoutError:
-                    terminal_output = "[Command timed out]"
-                except Exception as e:
-                    terminal_output = f"[Error: {e}]"
+                if keystrokes and self._session:
+                    try:
+                        await self._session.send_keys(
+                            keys=keystrokes,
+                            min_timeout_sec=float(duration),
+                            max_timeout_sec=180.0,
+                        )
+                    except Exception as e:
+                        print(f"Command error: {e}")
 
-            # Capture terminal state
-            try:
-                result = await environment.exec("tmux capture-pane -p")
-                terminal_output = result.stdout if result else terminal_output
-            except Exception:
-                pass
+            # Get terminal state after commands
+            terminal_output = ""
+            if self._session:
+                try:
+                    terminal_output = await self._session.get_visible_pane() or ""
+                except Exception:
+                    pass
 
             # Log terminal output
             print(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
