@@ -166,61 +166,38 @@ Set is_task_complete to true when you believe the task is finished.
         else:
             self._messages = [{"role": "system", "content": self._system_prompt}]
 
-    def _find_trajectory_folder(self, task_description: str) -> Optional[Path]:
-        """Find the trajectory folder. Uses TASK_NAME env var if set, otherwise first found."""
+    def _find_trajectory_folder(self, task_hash: str) -> Optional[Path]:
+        """Find the trajectory folder based on task hash prefix."""
         base_path = Path(self._base_folder)
         
         if not base_path.exists():
             print(f"Trajectory folder not found: {base_path}")
             return None
 
-        # Check for explicit task name from env
-        target_task_name = os.getenv("TASK_NAME")
-        
-        # Search all directories
+        # Look for hash-prefixed directories (format: <hash>-<task-id>/)
         for item in base_path.iterdir():
-            if not item.is_dir():
-                continue
-                
-            # Check if trajectory exists
-            trajectory_file = item / "agent" / "trajectory.json"
-            if not trajectory_file.exists():
+            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
+                # Check agent/ subdirectory (Harbor output structure)
+                trajectory_file = item / "agent" / "trajectory.json"
+                if trajectory_file.exists():
+                    print(f"Found trajectory for hash {task_hash}: {item}")
+                    return item
+                # Fall back to direct path
                 trajectory_file = item / "trajectory.json"
-            if not trajectory_file.exists():
-                continue
-            
-            # If TASK_NAME is set, match by task_name from result.json
-            result_file = item / "result.json"
-            if result_file.exists():
-                try:
-                    with open(result_file, "r") as f:
-                        result = json.load(f)
-                    stored_task_name = result.get("task_name", "")
-                    
-                    if target_task_name:
-                        # Match against explicit task name
-                        if stored_task_name == target_task_name:
-                            print(f"Found trajectory for task {target_task_name}: {item}")
-                            return item
-                    else:
-                        # No explicit task name - return first valid trajectory
-                        print(f"Found trajectory: {item}")
-                        return item
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
-            elif not target_task_name:
-                # No result.json but trajectory exists - use it if no specific task requested
-                print(f"Found trajectory (no result.json): {item}")
-                return item
+                if trajectory_file.exists():
+                    print(f"Found trajectory for hash {task_hash}: {item}")
+                    return item
 
-        print(f"No matching trajectory found in {base_path}")
+        print(f"No trajectory found for hash {task_hash} in {base_path}")
         return None
 
     def _read_trajectories(
         self, task_description: str, logging_dir: Optional[Path] = None
     ) -> tuple[list[Command], list[dict], int]:
         """Read commands and messages from ATIF trajectory file."""
-        trajectory_folder = self._find_trajectory_folder(task_description)
+        task_hash = create_task_hash(task_description)
+        print(f"Looking for trajectory with hash: {task_hash}")
+        trajectory_folder = self._find_trajectory_folder(task_hash)
 
         if trajectory_folder is None:
             return [], [], 0

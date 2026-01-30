@@ -215,7 +215,10 @@ def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
 
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
-    """Extract instruction from trajectory.json (ATIF format)."""
+    """Extract instruction from trajectory.json (ATIF format).
+    
+    Strips the terminus-2 system prompt to return just the task description.
+    """
     # Try agent/ subdirectory first (Harbor output structure)
     trajectory_file = task_dir / "agent" / "trajectory.json"
     if not trajectory_file.exists():
@@ -228,17 +231,36 @@ def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
         with open(trajectory_file, "r") as f:
             trajectory = json.load(f)
         
+        full_message = None
+        
         # ATIF v1.5 format: steps array with source field
         if "steps" in trajectory:
             for step in trajectory["steps"]:
                 if step.get("source") == "user":
-                    return step.get("message", "")
+                    full_message = step.get("message", "")
+                    break
         
         # Fallback: old format with role field
-        for step in trajectory:
-            if step.get("role") == "user":
-                return step.get("content", "")
-        return None
+        if not full_message:
+            for step in trajectory:
+                if step.get("role") == "user":
+                    full_message = step.get("content", "")
+                    break
+        
+        if not full_message:
+            return None
+        
+        # Strip terminus-2 system prompt - task description comes after "Task Description:\n"
+        task_marker = "Task Description:\n"
+        if task_marker in full_message:
+            task_part = full_message.split(task_marker, 1)[1]
+            # Also strip the "Current terminal state:" suffix if present
+            terminal_marker = "\n\nCurrent terminal state:"
+            if terminal_marker in task_part:
+                task_part = task_part.split(terminal_marker, 1)[0]
+            return task_part.strip()
+        
+        return full_message
     except (json.JSONDecodeError, FileNotFoundError):
         return None
 
@@ -457,9 +479,6 @@ def run_replay_agent_tb(
 
     env = os.environ.copy()
     env["TRAJECTORY_FOLDER"] = trajectory_folder
-    # Set TASK_NAME if only one task (for trajectory matching)
-    if len(task_ids) == 1:
-        env["TASK_NAME"] = task_ids[0]
 
     cmd = [
         "harbor",
