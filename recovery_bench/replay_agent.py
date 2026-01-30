@@ -123,14 +123,14 @@ Set is_task_complete to true when you believe the task is finished.
         commands, messages, n_episodes = self._read_trajectories(instruction)
         
         if len(commands) == 0:
-            context.add_log("No commands found in trajectory, starting fresh")
+            print("No commands found in trajectory, starting fresh")
             commands = []
             messages = []
             n_episodes = 0
 
         # Replay commands to restore environment state
         last_output = await self._replay_environment_async(environment, commands)
-        context.add_log(f"Replayed {len(commands)} commands from previous trajectory")
+        print(f"Replayed {len(commands)} commands from previous trajectory")
 
         # Set up messages for recovery
         self._add_messages(messages)
@@ -315,17 +315,14 @@ Set is_task_complete to true when you believe the task is finished.
                 )
                 assistant_content = response.choices[0].message.content
             except Exception as e:
-                context.add_log(f"LLM error: {e}")
+                print(f"LLM error: {e}")
                 break
 
             # Add assistant response to messages
             self._messages.append({"role": "assistant", "content": assistant_content})
             
             # Log the response
-            context.add_step(
-                action=assistant_content,
-                observation="",
-            )
+            print(f"Agent response: {assistant_content[:200]}...")
 
             # Parse response
             try:
@@ -344,7 +341,7 @@ Set is_task_complete to true when you believe the task is finished.
 
             # Check if task is complete
             if parsed.get("is_task_complete", False):
-                context.add_log("Agent reported task complete")
+                print("Agent reported task complete")
                 break
 
             # Execute commands
@@ -373,9 +370,8 @@ Set is_task_complete to true when you believe the task is finished.
             except Exception:
                 pass
 
-            # Update context with observation
-            if context._steps:
-                context._steps[-1].observation = terminal_output
+            # Log terminal output
+            print(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
 
             # Add terminal output to messages for next iteration
             self._messages.append({"role": "user", "content": terminal_output})
