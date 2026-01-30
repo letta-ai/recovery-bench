@@ -4,14 +4,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from collections import defaultdict
-
-# Import harbor dependencies
-try:
-    from harbor.models.task.task import Task
-except ImportError:
-    Task = None
+from typing import List
 
 
 def create_task_hash(task_description: str) -> str:
@@ -126,86 +119,7 @@ def get_unsolved_tasks(
     return unsolved_ids
 
 
-def extract_task_description(
-    task_name: str, task_folder: str | None = None
-) -> str | None:
-    """Extract task description from terminal-bench task.yaml file."""
-    if Task is None:
-        print("Warning: terminal_bench not available for task description extraction")
-        return None
-
-    try:
-        folder = task_folder if task_folder is not None else os.getenv("TASK_FOLDER")
-        if folder is None:
-            print(f"Warning: No task folder specified for {task_name}")
-            return None
-
-        task_path = Path(folder) / task_name / "task.yaml"
-        if not task_path.exists():
-            print(f"Warning: Task file not found for {task_name}")
-            return None
-
-        task = Task.from_yaml(task_path)
-        return task.instruction
-
-    except Exception as e:
-        print(f"Error reading task {task_name}: {e}")
-        return None
-
-
-def find_task_directories(base_path: str) -> Dict[str, str]:
-    """Find task directories with their names."""
-    task_dirs = {}
-    base_path = Path(base_path)
-
-    if not base_path.exists():
-        print(f"Error: Path {base_path} does not exist")
-        return task_dirs
-
-    for item in base_path.iterdir():
-        if (
-            item.is_dir()
-            and not item.name.startswith(".")
-            and not item.name.endswith((".json", ".log", ".lock"))
-        ):
-            task_subdir = None
-            for subitem in item.iterdir():
-                if subitem.is_dir() and subitem.name.startswith(item.name + "."):
-                    task_subdir = subitem
-                    break
-
-            if task_subdir:
-                task_dirs[str(item)] = item.name
-            else:
-                task_dirs[str(item)] = item.name
-
-    return task_dirs
-
-
-def find_hash_directories(base_path: str) -> Dict[str, list]:
-    """Find directories with hash prefixes."""
-    hash_dirs = {}
-    base_path = Path(base_path)
-
-    if not base_path.exists():
-        print(f"Error: Path {base_path} does not exist")
-        return hash_dirs
-
-    for item in base_path.iterdir():
-        if (
-            item.is_dir()
-            and not item.name.startswith(".")
-            and not item.name.endswith((".json", ".log", ".lock"))
-        ):
-            if len(item.name) > 9 and item.name[8] == "-":
-                hash_part = item.name[:8]
-                if all(c in "0123456789abcdef" for c in hash_part.lower()):
-                    hash_dirs[hash_part] = [str(item)]
-
-    return hash_dirs
-
-
-def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
+def is_hash_prefixed_directory(task_name: str) -> bool:
     """Check if directory name starts with an 8-char hex hash prefix."""
     if len(task_name) > 9 and task_name[8] == "-":
         hash_part = task_name[:8]
@@ -283,7 +197,7 @@ def reorganize_directories(base_path: str) -> None:
         
         task_name = task_dir.name
         
-        if is_hash_prefixed_directory(str(task_dir), task_name):
+        if is_hash_prefixed_directory(task_name):
             print(f"  {task_name} -> SKIPPED (already has hash prefix)")
             continue
 
@@ -308,145 +222,6 @@ def reorganize_directories(base_path: str) -> None:
     print(f"Processed {len(task_to_hash)} tasks")
 
 
-def reverse_reorganize_directories(base_path: str) -> None:
-    """Reverse reorganization by removing hash prefixes from directory names."""
-    print(f"Reversing reorganization in {base_path}")
-
-    hash_dirs = find_hash_directories(base_path)
-    if not hash_dirs:
-        print("No hash-prefixed directories found")
-        return
-
-    moved_count = 0
-
-    for hash_prefix, task_dirs in hash_dirs.items():
-        for task_dir in task_dirs:
-            task_dir_path = Path(task_dir)
-            task_name = task_dir_path.name
-
-            original_name = task_name[9:]  # Remove "12345678-"
-            target_dir = task_dir_path.parent / original_name
-
-            try:
-                shutil.move(str(task_dir), str(target_dir))
-                print(f"    Renamed {task_name} back to {original_name}")
-                moved_count += 1
-            except Exception as e:
-                print(f"    Error renaming {task_dir}: {e}")
-
-    print(f"Processed {moved_count} tasks")
-
-
-def find_task_info(logs_dir: Path) -> Dict[str, Tuple[Path, int, bool]]:
-    """Find all tasks in a logs directory and return their info (ATIF format).
-
-    Returns:
-        Dict mapping task_id -> (task_dir_path, episode_count, is_resolved)
-    """
-    task_info = {}
-
-    for task_id in os.listdir(logs_dir):
-        task_dir = logs_dir / task_id
-        if not task_dir.is_dir():
-            continue
-
-        results_file = task_dir / "results.json"
-        if not results_file.exists():
-            continue
-
-        try:
-            with open(results_file, "r") as f:
-                results = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            continue
-
-        is_resolved = results.get("is_resolved", False)
-        actual_task_id = results.get("task_id", task_id)
-
-        # Count episodes from trajectory.json
-        episode_count = 0
-        trajectory_file = task_dir / "trajectory.json"
-        if trajectory_file.exists():
-            try:
-                with open(trajectory_file, "r") as f:
-                    trajectory = json.load(f)
-                episode_count = sum(
-                    1 for step in trajectory 
-                    if step.get("role") == "assistant"
-                )
-            except (json.JSONDecodeError, FileNotFoundError):
-                pass
-
-        task_info[actual_task_id] = (task_dir, episode_count, is_resolved)
-
-    return task_info
-
-
-def collect_traces(logs_dirs: List[Path], output_dir: Path, min_episodes: int = 10):
-    """Collect traces from multiple logs directories, keeping only unresolved tasks
-    and selecting the version with the most episodes for each task.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    all_task_info = defaultdict(list)
-
-    for logs_dir in logs_dirs:
-        print(f"Scanning {logs_dir}...")
-        task_info = find_task_info(logs_dir)
-
-        for task_id, (task_dir, episode_count, is_resolved) in task_info.items():
-            all_task_info[task_id].append(
-                (task_dir, episode_count, is_resolved, logs_dir)
-            )
-
-    selected_tasks = {}
-    total_tasks = 0
-
-    for task_id, versions in all_task_info.items():
-        unresolved_versions = [
-            (task_dir, episode_count, is_resolved, source_dir)
-            for task_dir, episode_count, is_resolved, source_dir in versions
-            if not is_resolved
-        ]
-
-        if not unresolved_versions:
-            continue
-
-        best_version = max(unresolved_versions, key=lambda x: x[1])
-
-        if best_version[1] < min_episodes:
-            continue
-
-        selected_tasks[task_id] = best_version
-        total_tasks += 1
-
-    print(
-        f"Found {total_tasks} unresolved tasks to collect (with >= {min_episodes} episodes)"
-    )
-
-    for task_id, (
-        source_task_dir,
-        episode_count,
-        _,
-        source_logs_dir,
-    ) in selected_tasks.items():
-        task_output_dir = output_dir / task_id
-        task_output_dir.mkdir(parents=True, exist_ok=True)
-
-        target_name = source_task_dir.name
-        dest_path = task_output_dir / target_name
-
-        if dest_path.exists():
-            shutil.rmtree(dest_path)
-
-        shutil.copytree(source_task_dir, dest_path)
-
-        print(f"{task_id}: {episode_count} episodes (from {source_logs_dir})")
-
-    print(f"\nTotal tasks collected: {total_tasks}")
-    print(f"Output directory: {output_dir}")
-
-
 def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
@@ -469,7 +244,6 @@ def run_replay_agent_tb(
     dataset_version: str = "2.0",
     agent_import_path: str = "recovery_bench.replay_agent:ReplayAgent",
     n_concurrent: int = 1,
-    global_timeout_multiplier: float = 2.0,
     additional_args: List[str] | None = None,
     cleanup_container: bool = False,
 ):

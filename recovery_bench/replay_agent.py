@@ -1,11 +1,11 @@
 """
 ReplayAgent for Harbor/Terminal-Bench 2.0
 
-This module provides replay agents that can recover from failed trajectories.
-The agents read previous failed trajectories, replay the commands to restore
-the environment state, and then continue with fresh attempts.
+This module provides the ReplayAgent for recovery-bench. The agent reads
+previous failed trajectories, replays commands to restore the environment
+state, and then continues with fresh attempts to complete the task.
 
-Three variants are provided:
+Variants:
 - ReplayAgent: Full message history recovery
 - ReplayAgentWithoutMessages: Environment-only recovery  
 - ReplayAgentWithMessageSummaries: Summarized history recovery
@@ -14,7 +14,6 @@ Three variants are provided:
 from pathlib import Path
 import os
 import json
-from abc import ABC, abstractmethod
 from typing import Optional
 import asyncio
 
@@ -23,6 +22,7 @@ from harbor import BaseAgent, BaseEnvironment, AgentContext
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.models.trial.paths import EnvironmentPaths
 from datetime import datetime, timezone
+import re
 
 # LiteLLM for LLM calls
 import litellm
@@ -42,25 +42,7 @@ class Command:
         self.timeout_sec = timeout_sec
 
 
-class ReplayABC(ABC):
-    """Abstract base class for replay functionality."""
-    
-    @abstractmethod
-    def _replay_environment(self, environment: BaseEnvironment, commands: list[Command]) -> str:
-        pass
-
-    @abstractmethod
-    def _add_messages(self, messages: list[dict]) -> None:
-        pass
-
-    @abstractmethod
-    def _read_trajectories(
-        self, task_description: str, logging_dir: Optional[Path] = None
-    ) -> tuple[list[Command], list[dict], int]:
-        pass
-
-
-class ReplayAgent(BaseAgent, ReplayABC):
+class ReplayAgent(BaseAgent):
     """
     Replay agent that recovers from failed trajectories.
     
@@ -168,10 +150,8 @@ Set is_task_complete to true when you believe the task is finished.
         # Run the agent loop
         await self._run_agent_loop(
             recovery_prompt,
-            instruction,
             environment,
             context,
-            n_episodes
         )
         
         # Save trajectory
@@ -250,7 +230,7 @@ Set is_task_complete to true when you believe the task is finished.
         return None
 
     def _read_trajectories(
-        self, task_description: str, logging_dir: Optional[Path] = None
+        self, task_description: str
     ) -> tuple[list[Command], list[dict], int]:
         """Read commands and messages from ATIF trajectory file."""
         task_hash = create_task_hash(task_description)
@@ -320,12 +300,6 @@ Set is_task_complete to true when you believe the task is finished.
 
         return commands, messages, n_episodes
 
-    def _replay_environment(self, environment: BaseEnvironment, commands: list[Command]) -> str:
-        """Synchronous wrapper for replay (for compatibility)."""
-        return asyncio.get_event_loop().run_until_complete(
-            self._replay_environment_async(environment, commands)
-        )
-
     async def _replay_environment_async(
         self, environment: BaseEnvironment, commands: list[Command]
     ) -> str:
@@ -359,17 +333,15 @@ Set is_task_complete to true when you believe the task is finished.
     async def _run_agent_loop(
         self,
         initial_prompt: str,
-        instruction: str,
         environment: BaseEnvironment,
         context: AgentContext,
-        start_episode: int = 0
     ) -> None:
         """Run the main agent loop for recovery."""
         
         # Add initial prompt to messages
         self._messages.append({"role": "user", "content": initial_prompt})
         
-        for episode in range(start_episode, start_episode + self._max_episodes):
+        for episode in range(self._max_episodes):
             # Call LLM
             try:
                 response = await litellm.acompletion(
@@ -396,14 +368,13 @@ Set is_task_complete to true when you believe the task is finished.
                 parsed = json.loads(assistant_content)
             except json.JSONDecodeError:
                 # Try to extract JSON from response
-                try:
-                    import re
-                    json_match = re.search(r'\{.*\}', assistant_content, re.DOTALL)
-                    if json_match:
+                json_match = re.search(r'\{.*\}', assistant_content, re.DOTALL)
+                if json_match:
+                    try:
                         parsed = json.loads(json_match.group())
-                    else:
+                    except json.JSONDecodeError:
                         parsed = {"commands": [], "is_task_complete": False}
-                except:
+                else:
                     parsed = {"commands": [], "is_task_complete": False}
 
             # Check if task is complete (handle both key names)

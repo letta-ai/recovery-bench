@@ -3,19 +3,15 @@
 Generate recovery-bench traces.
 
 This script automates the entire trace generation pipeline:
-1. Generate initial traces
-2. Get task IDs that failed but without 10 (max_episode) traces
-3. Run replay agent on those tasks
-4. Filter again to get unsolved tasks
-5. Collect all traces into a single folder
+1. Generate initial traces with terminus-2
+2. Reorganize traces with hash prefixes for replay lookup
+3. Iteratively run replay agent on unsolved tasks
 
-Usage: python -m self_correction.generate_traces <model_name>
-Example: python -m self_correction.generate_traces anthropic/claude-3-5-haiku-20241022
+Usage: python -m recovery_bench.generate_traces <model_name>
+Example: python -m recovery_bench.generate_traces openai/gpt-4o-mini --task-id cancel-async-tasks
 """
 
 import argparse
-import sys
-from pathlib import Path
 from datetime import datetime
 from typing import List
 
