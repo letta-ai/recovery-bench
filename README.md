@@ -59,7 +59,6 @@ Key options:
 - `--n-concurrent`: Number of concurrent processes (default: 4)
 - `--max-iterations`: Maximum replay iterations (default: 3)
 - `--run-initial`: Only run initial traces, skip replay iterations
-- `--task-folder`: Path to task definitions folder
 
 ### Run Replay Agent
 

@@ -23,7 +23,6 @@ from .utils import (
     cleanup_docker,
     get_unsolved_tasks,
     collect_traces,
-    reorganize_directories,
     run_command,
     run_replay_agent_tb,
 )
@@ -108,11 +107,6 @@ def main():
     parser = argparse.ArgumentParser(description="Generate traces pipeline")
     parser.add_argument("model_name", help="Model name to use for trace generation")
     parser.add_argument(
-        "--task-folder",
-        default="./terminal-bench/tasks",
-        help="Path to task folder",
-    )
-    parser.add_argument(
         "--n-concurrent", type=int, default=4, help="Number of concurrent processes"
     )
     parser.add_argument(
@@ -184,10 +178,6 @@ def main():
         print(f"Just running initial traces for {args.model_name}")
         return
 
-    # Step 2: Hash reorganize initial traces
-    print(f"Reorganizing traces in {initial_traces_dir}...")
-    reorganize_directories(initial_traces_dir, args.task_folder)
-
     # Keep track of all trace directories
     all_trace_dirs = [initial_traces_dir]
 
@@ -218,10 +208,6 @@ def main():
             args.min_episodes,
             args.n_concurrent,
         )
-
-        # Hash reorganize the new traces
-        print(f"Reorganizing traces in {replay_traces_dir}...")
-        reorganize_directories(replay_traces_dir, args.task_folder)
 
         # Add to list of all trace directories
         all_trace_dirs.append(replay_traces_dir)
