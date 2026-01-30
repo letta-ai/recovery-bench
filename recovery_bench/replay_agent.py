@@ -303,7 +303,7 @@ Set is_task_complete to true when you believe the task is finished.
 
         # Get final terminal state
         try:
-            last_output = await self._session.get_visible_pane()
+            last_output = await self._session.capture_pane()
             return last_output or ""
         except Exception:
             return ""
@@ -381,15 +381,18 @@ Set is_task_complete to true when you believe the task is finished.
             terminal_output = ""
             if self._session:
                 try:
-                    terminal_output = await self._session.get_visible_pane() or ""
+                    terminal_output = await self._session.capture_pane() or ""
                 except Exception:
                     pass
 
             # Log terminal output
             print(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
 
-            # Add terminal output to messages for next iteration
-            self._messages.append({"role": "user", "content": terminal_output})
+            # Add terminal output to messages for next iteration (avoid empty content)
+            if terminal_output.strip():
+                self._messages.append({"role": "user", "content": terminal_output})
+            else:
+                self._messages.append({"role": "user", "content": "(No output)"})
 
 
 class ReplayAgentWithoutMessages(ReplayAgent):
