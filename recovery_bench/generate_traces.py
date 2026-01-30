@@ -23,6 +23,7 @@ from .utils import (
     cleanup_docker,
     get_unsolved_tasks,
     collect_traces,
+    reorganize_directories,
     run_command,
     run_replay_agent_tb,
 )
@@ -178,6 +179,10 @@ def main():
         print(f"Just running initial traces for {args.model_name}")
         return
 
+    # Step 2: Hash reorganize initial traces
+    print(f"Reorganizing traces in {initial_traces_dir}...")
+    reorganize_directories(initial_traces_dir)
+
     # Keep track of all trace directories
     all_trace_dirs = [initial_traces_dir]
 
@@ -208,6 +213,10 @@ def main():
             args.min_episodes,
             args.n_concurrent,
         )
+
+        # Hash reorganize the new traces
+        print(f"Reorganizing traces in {replay_traces_dir}...")
+        reorganize_directories(replay_traces_dir)
 
         # Add to list of all trace directories
         all_trace_dirs.append(replay_traces_dir)

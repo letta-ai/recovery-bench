@@ -202,34 +202,57 @@ def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
     return False
 
 
-def reorganize_directories(base_path: str, task_folder: str | None = None) -> None:
-    """Reorganize directories by adding task hash prefix."""
+def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
+    """Extract instruction from trajectory.json (ATIF format)."""
+    trajectory_file = task_dir / "trajectory.json"
+    if not trajectory_file.exists():
+        return None
+    
+    try:
+        with open(trajectory_file, "r") as f:
+            trajectory = json.load(f)
+        
+        # Find the first user message which contains the instruction
+        for step in trajectory:
+            if step.get("role") == "user":
+                return step.get("content", "")
+        return None
+    except (json.JSONDecodeError, FileNotFoundError):
+        return None
+
+
+def reorganize_directories(base_path: str) -> None:
+    """Reorganize directories by adding task hash prefix based on trajectory instruction."""
     print(f"Reorganizing {base_path}")
 
-    task_dirs = find_task_directories(base_path)
-    if not task_dirs:
-        print("No task directories found")
+    base_path = Path(base_path)
+    if not base_path.exists():
+        print("Path does not exist")
         return
 
     task_to_hash = {}
 
-    for task_dir, task_name in task_dirs.items():
-        if is_hash_prefixed_directory(task_dir, task_name):
+    for task_dir in base_path.iterdir():
+        if not task_dir.is_dir():
+            continue
+        
+        task_name = task_dir.name
+        
+        if is_hash_prefixed_directory(str(task_dir), task_name):
             print(f"  {task_name} -> SKIPPED (already has hash prefix)")
             continue
 
-        task_description = extract_task_description(task_name, task_folder)
-        if task_description:
-            task_hash = create_task_hash(task_description)
+        instruction = extract_instruction_from_trajectory(task_dir)
+        if instruction:
+            task_hash = create_task_hash(instruction)
             task_to_hash[task_dir] = task_hash
             print(f"  {task_name} -> {task_hash}")
         else:
-            print(f"  {task_name} -> SKIPPED (no task definition)")
+            print(f"  {task_name} -> SKIPPED (no trajectory.json or instruction)")
 
     for task_dir, task_hash in task_to_hash.items():
-        task_name = Path(task_dir).name
-        base_dir = Path(task_dir).parent
-        new_task_dir = base_dir / f"{task_hash}-{task_name}"
+        task_name = task_dir.name
+        new_task_dir = task_dir.parent / f"{task_hash}-{task_name}"
 
         try:
             shutil.move(str(task_dir), str(new_task_dir))
