@@ -53,6 +53,7 @@ python3 -m recovery_bench.generate_traces openai/gpt-4o-mini \
 ```
 
 Key options:
+- `--task-id`: Specific task ID(s) to run (can be specified multiple times)
 - `--dataset-version`: Dataset version (default: 2.0)
 - `--min-episodes`: Minimum episodes per task (default: 10)
 - `--n-concurrent`: Number of concurrent processes (default: 4)

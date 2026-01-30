@@ -30,7 +30,11 @@ from .utils import (
 
 
 def generate_initial_traces(
-    model_name: str, run_id: str, dataset_version: str = "2.0", n_concurrent: int = 6
+    model_name: str,
+    run_id: str,
+    dataset_version: str = "2.0",
+    n_concurrent: int = 6,
+    task_ids: List[str] | None = None,
 ) -> str:
     """Generate initial traces using harbor run."""
     print(f"Generating initial traces for {model_name}...")
@@ -49,6 +53,10 @@ def generate_initial_traces(
         "--n-concurrent",
         str(n_concurrent),
     ]
+
+    if task_ids:
+        for task_id in task_ids:
+            cmd.extend(["--task-id", task_id])
 
     run_command(cmd)
     return f"runs/{run_id}"
@@ -143,6 +151,13 @@ def main():
         default=None,
         help="Path to an existing initial trajectories directory to resume from (skips initial generation)",
     )
+    parser.add_argument(
+        "--task-id",
+        type=str,
+        action="append",
+        dest="task_ids",
+        help="Specific task ID(s) to run (can be specified multiple times)",
+    )
 
     args = parser.parse_args()
 
@@ -162,7 +177,7 @@ def main():
     else:
         initial_run_id = f"initial-{model_short}-{timestamp}"
         initial_traces_dir = generate_initial_traces(
-            args.model_name, initial_run_id, args.dataset_version, args.n_concurrent
+            args.model_name, initial_run_id, args.dataset_version, args.n_concurrent, args.task_ids
         )
 
     if args.run_initial:
