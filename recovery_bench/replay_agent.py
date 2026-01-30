@@ -66,7 +66,8 @@ class ReplayAgent(BaseAgent, ReplayABC):
     history, prompting the model to try a different approach.
     """
 
-    def __init__(self, model_name: str = "anthropic/claude-sonnet-4-20250514", **kwargs):
+    def __init__(self, logs_dir=None, model_name: str = "anthropic/claude-sonnet-4-20250514", **kwargs):
+        super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
         self._model_name = model_name
