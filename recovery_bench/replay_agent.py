@@ -166,15 +166,15 @@ Set is_task_complete to true when you believe the task is finished.
             self._messages = [{"role": "system", "content": self._system_prompt}]
 
     def _find_trajectory_folder(self, task_hash: str) -> Optional[Path]:
-        """Find the trajectory folder based on task hash (ATIF format)."""
+        """Find the trajectory folder based on task hash prefix."""
         base_path = Path(self._base_folder)
         
         if not base_path.exists():
             return None
 
-        # Look for task directories with trajectory.json
+        # Look for hash-prefixed directories (format: <hash>-<task-id>/)
         for item in base_path.iterdir():
-            if item.is_dir():
+            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
                 trajectory_file = item / "trajectory.json"
                 if trajectory_file.exists():
                     return item
