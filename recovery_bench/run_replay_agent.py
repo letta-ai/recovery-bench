@@ -49,7 +49,7 @@ def main():
     parser.add_argument(
         "--agent-import-path",
         type=str,
-        default="recovery-bench.replay_agent:ReplayAgent",
+        default="recovery_bench.replay_agent:ReplayAgent",
         help="Import path for the agent",
     )
     parser.add_argument(

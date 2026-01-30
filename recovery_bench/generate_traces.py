@@ -79,7 +79,7 @@ def run_replay_agent_for_unsolved(
         model_name=model_name,
         task_ids=unsolved_task_ids,
         run_id=run_id,
-        agent_import_path="recovery-bench.replay_agent:ReplayAgent",
+        agent_import_path="recovery_bench.replay_agent:ReplayAgent",
         n_concurrent=n_concurrent,
     )
 
