@@ -22,7 +22,6 @@ from typing import List
 from .utils import (
     cleanup_docker,
     get_unsolved_tasks,
-    collect_traces,
     reorganize_directories,
     run_command,
     run_replay_agent_tb,
@@ -92,16 +91,6 @@ def run_replay_agent_for_unsolved(
     )
 
     return f"jobs/{run_id}"
-
-
-def collect_all_traces(logs_dirs: List[str], output_dir: str, min_episodes: int = 10):
-    """Collect traces from multiple directories."""
-    print(f"Collecting traces from {len(logs_dirs)} directories into {output_dir}...")
-
-    logs_dirs_paths = [Path(d) for d in logs_dirs]
-    output_dir_path = Path(output_dir)
-
-    collect_traces(logs_dirs_paths, output_dir_path, min_episodes)
 
 
 def main():
@@ -211,8 +200,9 @@ def main():
         )
 
         # Run replay agent
-        replay_run_id = f"replay-{model_short}-{timestamp}-iter{iteration}"
         replay_model = args.replay_model or args.model_name
+        replay_model_short = replay_model.split("/")[-1]
+        replay_run_id = f"replay-{replay_model_short}-{timestamp}-iter{iteration}"
         replay_traces_dir = run_replay_agent_for_unsolved(
             current_traces_dir,
             replay_model,
@@ -231,16 +221,9 @@ def main():
         # Update current directory for next iteration
         current_traces_dir = replay_traces_dir
 
-    # Step 4: Collect all traces into single folder
-    collected_dir = f"jobs/{model_short}-collected-{timestamp}"
-    collect_all_traces(all_trace_dirs, collected_dir, args.min_episodes)
-
     print(f"\n--- Pipeline completed successfully! ---")
     print(f"Initial traces: {initial_traces_dir}")
     print(f"All trace directories: {all_trace_dirs}")
-    print(f"Final collected traces: {collected_dir}")
-
-    return collected_dir
 
 
 if __name__ == "__main__":
