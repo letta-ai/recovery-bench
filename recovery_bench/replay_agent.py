@@ -202,8 +202,14 @@ Set is_task_complete to true when you believe the task is finished.
             "steps": self._trajectory_steps,
         }
         
-        trajectory_path = EnvironmentPaths.agent_dir / "trajectory.json"
+        # Use logs_dir passed to agent (not container path)
+        if self._logs_dir:
+            trajectory_path = Path(self._logs_dir) / "trajectory.json"
+        else:
+            trajectory_path = Path("trajectory.json")
+            
         try:
+            trajectory_path.parent.mkdir(parents=True, exist_ok=True)
             with open(trajectory_path, "w") as f:
                 json.dump(trajectory, f, indent=2)
             print(f"Trajectory saved to {trajectory_path}")
