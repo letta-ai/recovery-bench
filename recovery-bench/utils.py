@@ -7,15 +7,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
-# Import harbor dependencies when available
+# Import harbor dependencies
 try:
     from harbor.models.task.task import Task
 except ImportError:
-    try:
-        # Fall back to terminal_bench for backward compatibility
-        from terminal_bench.handlers.trial_handler import Task
-    except ImportError:
-        Task = None
+    Task = None
 
 
 def create_task_hash(task_description: str) -> str:
@@ -55,32 +51,22 @@ def cleanup_docker():
 def get_unsolved_tasks(
     logs_dir: str, min_episodes_desired: int = None, print_output: bool = False
 ) -> List[str]:
-    """Get list of unsolved task IDs from a logs directory.
-    
-    Supports both old format (agent-logs directory) and new ATIF format (trajectory.json).
-    """
+    """Get list of unsolved task IDs from a logs directory (ATIF format)."""
     logs_dir = Path(logs_dir)
     unsolved_ids = []
 
-    for unsolved_id in os.listdir(logs_dir):
-        if not (logs_dir / unsolved_id).is_dir():
+    for task_id in os.listdir(logs_dir):
+        task_dir = logs_dir / task_id
+        if not task_dir.is_dir():
             continue
-        unsolved_dir = logs_dir / unsolved_id
-        
-        # Try old format: look for "1-of-1" subdirectories
-        matching_dirs = [
-            d for d in unsolved_dir.iterdir() if d.is_dir() and "1-of-1" in d.name
-        ]
-
-        if matching_dirs:
-            target_dir = matching_dirs[0]
-        else:
-            # Try ATIF format: task directory directly contains results
-            target_dir = unsolved_dir
 
         # Look for results.json
+        results_file = task_dir / "results.json"
+        if not results_file.exists():
+            continue
+            
         try:
-            with open(target_dir / "results.json", "r") as f:
+            with open(results_file, "r") as f:
                 results = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             continue
@@ -88,46 +74,36 @@ def get_unsolved_tasks(
         if results.get("is_resolved", False):
             continue
 
-        # Count episodes - try both formats
+        # Count episodes from trajectory.json
         episode_count = 0
-        
-        # Old format: count episode directories
-        agent_logs_dir = target_dir / "agent-logs"
-        if agent_logs_dir.is_dir():
-            episode_count = len(list(agent_logs_dir.iterdir()))
+        trajectory_file = task_dir / "trajectory.json"
+        if trajectory_file.exists():
+            try:
+                with open(trajectory_file, "r") as f:
+                    trajectory = json.load(f)
+                episode_count = sum(
+                    1 for step in trajectory 
+                    if step.get("role") == "assistant"
+                )
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
         else:
-            # ATIF format: count assistant messages in trajectory.json
-            trajectory_file = target_dir / "trajectory.json"
-            if trajectory_file.exists():
-                try:
-                    with open(trajectory_file, "r") as f:
-                        trajectory = json.load(f)
-                    episode_count = sum(
-                        1 for step in trajectory 
-                        if step.get("role") == "assistant"
-                    )
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
-            else:
-                if print_output:
-                    print(f"Skipping {target_dir}: no agent-logs or trajectory.json")
-                continue
+            if print_output:
+                print(f"Skipping {task_dir}: no trajectory.json")
+            continue
 
         if (
             min_episodes_desired is not None
             and episode_count > min_episodes_desired
         ):
             if print_output:
-                print(
-                    f"Skipping {target_dir}: {episode_count} episodes > {min_episodes_desired}"
-                )
+                print(f"Skipping {task_dir}: {episode_count} episodes > {min_episodes_desired}")
             continue
             
-        unsolved_ids.append(results.get("task_id", unsolved_id))
+        unsolved_ids.append(results.get("task_id", task_id))
 
     if print_output:
         print(f"Found {len(unsolved_ids)} unsolved tasks")
-        print("Task IDs:")
         for task_id in unsolved_ids:
             print(f"  {task_id}")
 
@@ -294,9 +270,7 @@ def reverse_reorganize_directories(base_path: str) -> None:
 
 
 def find_task_info(logs_dir: Path) -> Dict[str, Tuple[Path, int, bool]]:
-    """Find all tasks in a logs directory and return their info.
-
-    Supports both old format (agent-logs directory) and new ATIF format (trajectory.json).
+    """Find all tasks in a logs directory and return their info (ATIF format).
 
     Returns:
         Dict mapping task_id -> (task_dir_path, episode_count, is_resolved)
@@ -304,27 +278,16 @@ def find_task_info(logs_dir: Path) -> Dict[str, Tuple[Path, int, bool]]:
     task_info = {}
 
     for task_id in os.listdir(logs_dir):
-        task_path = logs_dir / task_id
-        if not task_path.is_dir():
+        task_dir = logs_dir / task_id
+        if not task_dir.is_dir():
             continue
 
-        # Try old format: look for "1-of-1" subdirectories
-        matching_dirs = [
-            d for d in task_path.iterdir() if d.is_dir() and "1-of-1" in d.name
-        ]
-
-        if matching_dirs:
-            target_dir = matching_dirs[0]
-        else:
-            # Try ATIF format: task directory directly contains results
-            target_dir = task_path
-
-        results_path = target_dir / "results.json"
-        if not results_path.exists():
+        results_file = task_dir / "results.json"
+        if not results_file.exists():
             continue
 
         try:
-            with open(results_path, "r") as f:
+            with open(results_file, "r") as f:
                 results = json.load(f)
         except (json.JSONDecodeError, FileNotFoundError):
             continue
@@ -332,28 +295,21 @@ def find_task_info(logs_dir: Path) -> Dict[str, Tuple[Path, int, bool]]:
         is_resolved = results.get("is_resolved", False)
         actual_task_id = results.get("task_id", task_id)
 
-        # Count episodes - try both formats
+        # Count episodes from trajectory.json
         episode_count = 0
-        
-        # Old format: count episode directories
-        agent_logs_dir = target_dir / "agent-logs"
-        if agent_logs_dir.exists() and agent_logs_dir.is_dir():
-            episode_count = len(list(agent_logs_dir.iterdir()))
-        else:
-            # ATIF format: count assistant messages in trajectory.json
-            trajectory_file = target_dir / "trajectory.json"
-            if trajectory_file.exists():
-                try:
-                    with open(trajectory_file, "r") as f:
-                        trajectory = json.load(f)
-                    episode_count = sum(
-                        1 for step in trajectory 
-                        if step.get("role") == "assistant"
-                    )
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
+        trajectory_file = task_dir / "trajectory.json"
+        if trajectory_file.exists():
+            try:
+                with open(trajectory_file, "r") as f:
+                    trajectory = json.load(f)
+                episode_count = sum(
+                    1 for step in trajectory 
+                    if step.get("role") == "assistant"
+                )
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
 
-        task_info[actual_task_id] = (target_dir, episode_count, is_resolved)
+        task_info[actual_task_id] = (task_dir, episode_count, is_resolved)
 
     return task_info
 

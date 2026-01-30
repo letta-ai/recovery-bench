@@ -168,27 +168,13 @@ Set is_task_complete to true when you believe the task is finished.
             self._messages = [{"role": "system", "content": self._system_prompt}]
 
     def _find_trajectory_folder(self, task_hash: str) -> Optional[Path]:
-        """
-        Find the trajectory folder based on task hash.
-        
-        Supports both old format (hash-task_name/task_name.1-of-1/) 
-        and new ATIF format (run_dir/task_name/).
-        """
+        """Find the trajectory folder based on task hash (ATIF format)."""
         base_path = Path(self._base_folder)
         
         if not base_path.exists():
             return None
 
-        # Try old format: hash-prefixed directories
-        for item in base_path.iterdir():
-            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
-                # Find nested subdirectory
-                for subdir in item.iterdir():
-                    if subdir.is_dir() and "1-of-1" in subdir.name:
-                        return subdir
-                return item
-
-        # Try new ATIF format: direct task directories
+        # Look for task directories with trajectory.json
         for item in base_path.iterdir():
             if item.is_dir():
                 trajectory_file = item / "trajectory.json"
@@ -200,31 +186,17 @@ Set is_task_complete to true when you believe the task is finished.
     def _read_trajectories(
         self, task_description: str, logging_dir: Optional[Path] = None
     ) -> tuple[list[Command], list[dict], int]:
-        """
-        Read commands and messages from trajectory files.
-        
-        Supports both old episode-based format and new ATIF format.
-        """
+        """Read commands and messages from ATIF trajectory file."""
         task_hash = create_task_hash(task_description)
         trajectory_folder = self._find_trajectory_folder(task_hash)
 
         if trajectory_folder is None:
             return [], [], 0
 
-        # Check for ATIF format (trajectory.json)
-        atif_file = trajectory_folder / "trajectory.json"
-        if atif_file.exists():
-            return self._read_atif_trajectory(atif_file)
+        trajectory_file = trajectory_folder / "trajectory.json"
+        if not trajectory_file.exists():
+            return [], [], 0
 
-        # Fall back to old episode-based format
-        agent_logs_dir = trajectory_folder / "agent-logs"
-        if agent_logs_dir.exists():
-            return self._read_episode_trajectory(agent_logs_dir)
-
-        return [], [], 0
-
-    def _read_atif_trajectory(self, trajectory_file: Path) -> tuple[list[Command], list[dict], int]:
-        """Read trajectory from ATIF format."""
         try:
             with open(trajectory_file, "r") as f:
                 trajectory = json.load(f)
@@ -259,67 +231,6 @@ Set is_task_complete to true when you believe the task is finished.
                 messages.append({"role": role, "content": content})
 
         return commands, messages, n_episodes
-
-    def _read_episode_trajectory(self, agent_logs_dir: Path) -> tuple[list[Command], list[dict], int]:
-        """Read trajectory from old episode-based format."""
-        commands = []
-        messages = []
-
-        # Find all episode directories
-        episode_dirs = []
-        for item in agent_logs_dir.iterdir():
-            if item.is_dir() and item.name.startswith("episode-"):
-                try:
-                    episode_num = int(item.name.split("-")[1])
-                    episode_dirs.append((episode_num, item))
-                except ValueError:
-                    continue
-
-        episode_dirs.sort(key=lambda x: x[0])
-
-        # Read commands from each episode
-        for episode_num, episode_dir in episode_dirs:
-            response_file = episode_dir / "response.json"
-            if response_file.exists():
-                try:
-                    with open(response_file, "r") as f:
-                        response = json.load(f)
-                    if "commands" in response:
-                        for cmd in response["commands"]:
-                            commands.append(Command(
-                                keystrokes=cmd.get("keystrokes", ""),
-                                is_blocking=cmd.get("is_blocking", True),
-                                timeout_sec=cmd.get("timeout_sec", 120)
-                            ))
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
-
-        # Read messages from the last episode's debug.json
-        if episode_dirs:
-            last_episode_dir = episode_dirs[-1][1]
-            debug_file = last_episode_dir / "debug.json"
-            if debug_file.exists():
-                try:
-                    with open(debug_file, "r") as f:
-                        debug_data = json.load(f)
-                    if "input" in debug_data and isinstance(debug_data["input"], list):
-                        messages = self._clean_debug_messages(debug_data["input"])
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
-
-        return commands, messages, len(episode_dirs)
-
-    def _clean_debug_messages(self, messages: list[dict]) -> list[dict]:
-        """Clean debug messages by extracting text content."""
-        cleaned = []
-        for msg in messages:
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                # Extract text from content list
-                text_parts = [item.get("text", "") for item in content if isinstance(item, dict)]
-                content = "\n".join(text_parts)
-            cleaned.append({"role": msg.get("role", "user"), "content": content})
-        return cleaned
 
     def _replay_environment(self, environment: BaseEnvironment, commands: list[Command]) -> str:
         """Synchronous wrapper for replay (for compatibility)."""
