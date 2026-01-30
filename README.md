@@ -28,12 +28,12 @@ export OPENAI_API_KEY="your-key"
 
 ### 1. Generate Recovery-Bench Traces
 ```bash
-python3 -m recovery-bench.generate_traces openai/gpt-4o-mini
+python3 -m recovery_bench.generate_traces openai/gpt-4o-mini
 ```
 
 ### 2. Run Replay/Recovery Agent
 ```bash
-python3 -m recovery-bench.run_replay_agent \
+python3 -m recovery_bench.run_replay_agent \
     --trajectory-folder runs/gpt-4o-mini-collected-TIMESTAMP \
     --model-name anthropic/claude-sonnet-4-20250514
 ```
@@ -45,7 +45,7 @@ python3 -m recovery-bench.run_replay_agent \
 Generate complete recovery-bench traces for a model:
 
 ```bash
-python3 -m recovery-bench.generate_traces openai/gpt-4o-mini \
+python3 -m recovery_bench.generate_traces openai/gpt-4o-mini \
     --dataset-version 2.0 \
     --min-episodes 10 \
     --n-concurrent 4 \
@@ -65,7 +65,7 @@ Key options:
 Run the replay/recovery agent on collected traces:
 
 ```bash
-python3 -m recovery-bench.run_replay_agent \
+python3 -m recovery_bench.run_replay_agent \
     --trajectory-folder runs/collected-traces \
     --model-name anthropic/claude-sonnet-4-20250514 \
     --run-id recovery-test-1 \
@@ -85,17 +85,17 @@ Three replay agent variants are available:
 
 1. **ReplayAgent** (default): Uses full message history from failed attempts
    ```bash
-   --agent-import-path recovery-bench.replay_agent:ReplayAgent
+   --agent-import-path recovery_bench.replay_agent:ReplayAgent
    ```
 
 2. **ReplayAgentWithoutMessages**: Only restores environment state, no message history
    ```bash
-   --agent-import-path recovery-bench.replay_agent:ReplayAgentWithoutMessages
+   --agent-import-path recovery_bench.replay_agent:ReplayAgentWithoutMessages
    ```
 
 3. **ReplayAgentWithMessageSummaries**: Uses summarized message history
    ```bash
-   --agent-import-path recovery-bench.replay_agent:ReplayAgentWithMessageSummaries
+   --agent-import-path recovery_bench.replay_agent:ReplayAgentWithMessageSummaries
    ```
 
 ## How It Works

@@ -19,9 +19,7 @@ from typing import Optional
 import asyncio
 
 # Harbor imports
-from harbor.agents.base import BaseAgent
-from harbor.models.environment.base import BaseEnvironment
-from harbor.models.agent.context import AgentContext
+from harbor import BaseAgent, BaseEnvironment, AgentContext
 
 # LiteLLM for LLM calls
 import litellm
