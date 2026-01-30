@@ -389,15 +389,15 @@ def run_replay_agent_tb(
     model_name: str,
     task_ids: List[str],
     run_id: str | None = None,
-    dataset_name: str = "terminal-bench-core",
-    dataset_version: str = "0.2.15",
+    dataset_name: str = "terminal-bench",
+    dataset_version: str = "2.0",
     agent_import_path: str = "recovery-bench.replay_agent:ReplayAgent",
     n_concurrent: int = 1,
     global_timeout_multiplier: float = 2.0,
     additional_args: List[str] | None = None,
     cleanup_container: bool = False,
 ):
-    """Run the replay agent for multiple task IDs using tb run command."""
+    """Run the replay agent for multiple task IDs using harbor run command."""
 
     if cleanup_container:
         cleanup_docker()
@@ -406,22 +406,16 @@ def run_replay_agent_tb(
     env["TRAJECTORY_FOLDER"] = trajectory_folder
 
     cmd = [
-        "tb",
+        "harbor",
         "run",
-        "--dataset-name",
-        dataset_name,
-        "--dataset-version",
-        dataset_version,
+        "--dataset",
+        f"{dataset_name}@{dataset_version}",
         "--agent-import-path",
         agent_import_path,
-        "--model-name",
+        "--model",
         model_name,
         "--n-concurrent",
         str(n_concurrent),
-        "--global-timeout-multiplier",
-        str(global_timeout_multiplier),
-        "--local-registry-path",
-        "./registry.json",
     ]
 
     if run_id:
@@ -432,8 +426,6 @@ def run_replay_agent_tb(
 
     if additional_args:
         cmd.extend(additional_args)
-
-    cmd.extend(["--cleanup"])
 
     print(f"Running command: {' '.join(cmd)}")
     print(f"Environment TRAJECTORY_FOLDER: {trajectory_folder}")

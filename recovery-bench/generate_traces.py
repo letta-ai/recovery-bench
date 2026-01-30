@@ -30,29 +30,24 @@ from .utils import (
 
 
 def generate_initial_traces(
-    model_name: str, run_id: str, dataset_version: str = "0.2.15", n_concurrent: int = 6
+    model_name: str, run_id: str, dataset_version: str = "2.0", n_concurrent: int = 6
 ) -> str:
-    """Generate initial traces using tb run."""
+    """Generate initial traces using harbor run."""
     print(f"Generating initial traces for {model_name}...")
 
     cmd = [
-        "tb",
+        "harbor",
         "run",
-        "--dataset-name",
-        "terminal-bench-core",
-        "--dataset-version",
-        dataset_version,
+        "--dataset",
+        f"terminal-bench@{dataset_version}",
         "--agent",
-        "terminus",
-        "--model-name",
+        "terminus-2",
+        "--model",
         model_name,
         "--run-id",
         run_id,
         "--n-concurrent",
         str(n_concurrent),
-        "--cleanup",
-        "--local-registry-path",
-        "./registry.json",
     ]
 
     run_command(cmd)
@@ -139,8 +134,8 @@ def main():
     parser.add_argument(
         "--dataset-version",
         type=str,
-        default="0.2.15",
-        help="Dataset version to use for initial trace generation",
+        default="2.0",
+        help="Dataset version to use for initial trace generation (e.g., 2.0)",
     )
     parser.add_argument(
         "--resume-initial",

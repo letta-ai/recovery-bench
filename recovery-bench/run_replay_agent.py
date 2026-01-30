@@ -40,11 +40,11 @@ def main():
     parser.add_argument(
         "--dataset-name",
         type=str,
-        default="terminal-bench-core",
+        default="terminal-bench",
         help="Name of the dataset",
     )
     parser.add_argument(
-        "--dataset-version", type=str, default="0.2.15", help="Version of the dataset"
+        "--dataset-version", type=str, default="2.0", help="Version of the dataset"
     )
     parser.add_argument(
         "--agent-import-path",
