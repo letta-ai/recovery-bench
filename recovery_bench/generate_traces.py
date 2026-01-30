@@ -48,7 +48,7 @@ def generate_initial_traces(
         "terminus-2",
         "--model",
         model_name,
-        "--run-id",
+        "--job-name",
         run_id,
         "--n-concurrent",
         str(n_concurrent),
@@ -56,7 +56,7 @@ def generate_initial_traces(
 
     if task_ids:
         for task_id in task_ids:
-            cmd.extend(["--task-id", task_id])
+            cmd.extend(["--task-name", task_id])
 
     run_command(cmd)
     return f"runs/{run_id}"

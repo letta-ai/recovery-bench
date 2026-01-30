@@ -450,10 +450,10 @@ def run_replay_agent_tb(
     ]
 
     if run_id:
-        cmd.extend(["--run-id", run_id])
+        cmd.extend(["--job-name", run_id])
 
     for task_id in task_ids:
-        cmd.extend(["--task-id", task_id])
+        cmd.extend(["--task-name", task_id])
 
     if additional_args:
         cmd.extend(additional_args)
