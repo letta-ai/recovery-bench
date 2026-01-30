@@ -206,15 +206,11 @@ def find_hash_directories(base_path: str) -> Dict[str, list]:
 
 
 def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
-    """Check if directory is already hash-prefixed by inspecting subdirectory structure."""
+    """Check if directory name starts with an 8-char hex hash prefix."""
     if len(task_name) > 9 and task_name[8] == "-":
         hash_part = task_name[:8]
         if all(c in "0123456789abcdef" for c in hash_part.lower()):
-            name_after_dash = task_name[9:]
-            task_path = Path(task_dir)
-            for subitem in task_path.iterdir():
-                if subitem.is_dir() and subitem.name.startswith(name_after_dash + "."):
-                    return True
+            return True
     return False
 
 
