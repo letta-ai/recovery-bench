@@ -175,6 +175,11 @@ Set is_task_complete to true when you believe the task is finished.
         # Look for hash-prefixed directories (format: <hash>-<task-id>/)
         for item in base_path.iterdir():
             if item.is_dir() and item.name.startswith(f"{task_hash}-"):
+                # Check agent/ subdirectory (Harbor output structure)
+                trajectory_file = item / "agent" / "trajectory.json"
+                if trajectory_file.exists():
+                    return item
+                # Fall back to direct path
                 trajectory_file = item / "trajectory.json"
                 if trajectory_file.exists():
                     return item
@@ -191,7 +196,10 @@ Set is_task_complete to true when you believe the task is finished.
         if trajectory_folder is None:
             return [], [], 0
 
-        trajectory_file = trajectory_folder / "trajectory.json"
+        # Check agent/ subdirectory first (Harbor output structure)
+        trajectory_file = trajectory_folder / "agent" / "trajectory.json"
+        if not trajectory_file.exists():
+            trajectory_file = trajectory_folder / "trajectory.json"
         if not trajectory_file.exists():
             return [], [], 0
 
@@ -205,26 +213,44 @@ Set is_task_complete to true when you believe the task is finished.
         messages = []
         n_episodes = 0
 
-        for step in trajectory:
-            role = step.get("role", "")
-            content = step.get("content", "")
+        # ATIF v1.5 format: steps array with source field
+        steps = trajectory.get("steps", trajectory)  # Fall back to trajectory itself if no steps key
+        
+        for step in steps:
+            # Handle ATIF v1.5 format (source/message)
+            source = step.get("source", step.get("role", ""))
+            content = step.get("message", step.get("content", ""))
             
-            if role == "assistant":
+            if source == "agent" or source == "assistant":
                 n_episodes += 1
-                # Parse command batch from assistant response
-                try:
-                    response = json.loads(content) if isinstance(content, str) else content
-                    if "commands" in response:
-                        for cmd in response["commands"]:
-                            commands.append(Command(
-                                keystrokes=cmd.get("keystrokes", ""),
-                                is_blocking=cmd.get("is_blocking", True),
-                                timeout_sec=cmd.get("timeout_sec", 120)
-                            ))
-                except (json.JSONDecodeError, TypeError):
-                    pass
+                # Extract commands from tool_calls (ATIF v1.5)
+                tool_calls = step.get("tool_calls", [])
+                for tool_call in tool_calls:
+                    args = tool_call.get("arguments", {})
+                    keystrokes = args.get("keystrokes", "")
+                    if keystrokes:
+                        commands.append(Command(
+                            keystrokes=keystrokes,
+                            is_blocking=True,
+                            timeout_sec=int(args.get("duration", 1) * 10) + 5  # Convert duration to timeout
+                        ))
+                
+                # Also try parsing message content for commands (old format)
+                if not tool_calls:
+                    try:
+                        response = json.loads(content) if isinstance(content, str) else content
+                        if isinstance(response, dict) and "commands" in response:
+                            for cmd in response["commands"]:
+                                commands.append(Command(
+                                    keystrokes=cmd.get("keystrokes", ""),
+                                    is_blocking=cmd.get("is_blocking", True),
+                                    timeout_sec=cmd.get("timeout_sec", 120)
+                                ))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
             
             # Add to messages for context
+            role = "assistant" if source == "agent" else source
             if role in ["user", "assistant", "system"]:
                 messages.append({"role": role, "content": content})
 

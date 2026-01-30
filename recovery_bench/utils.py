@@ -204,7 +204,11 @@ def is_hash_prefixed_directory(task_dir: str, task_name: str) -> bool:
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
     """Extract instruction from trajectory.json (ATIF format)."""
-    trajectory_file = task_dir / "trajectory.json"
+    # Try agent/ subdirectory first (Harbor output structure)
+    trajectory_file = task_dir / "agent" / "trajectory.json"
+    if not trajectory_file.exists():
+        # Fall back to direct path
+        trajectory_file = task_dir / "trajectory.json"
     if not trajectory_file.exists():
         return None
     
@@ -212,7 +216,13 @@ def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
         with open(trajectory_file, "r") as f:
             trajectory = json.load(f)
         
-        # Find the first user message which contains the instruction
+        # ATIF v1.5 format: steps array with source field
+        if "steps" in trajectory:
+            for step in trajectory["steps"]:
+                if step.get("source") == "user":
+                    return step.get("message", "")
+        
+        # Fallback: old format with role field
         for step in trajectory:
             if step.get("role") == "user":
                 return step.get("content", "")
