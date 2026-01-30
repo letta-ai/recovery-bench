@@ -355,8 +355,8 @@ Set is_task_complete to true when you believe the task is finished.
                 except:
                     parsed = {"commands": [], "is_task_complete": False}
 
-            # Check if task is complete
-            if parsed.get("is_task_complete", False):
+            # Check if task is complete (handle both key names)
+            if parsed.get("is_task_complete", False) or parsed.get("task_complete", False):
                 print("Agent reported task complete")
                 break
 
