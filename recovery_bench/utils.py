@@ -457,6 +457,9 @@ def run_replay_agent_tb(
 
     env = os.environ.copy()
     env["TRAJECTORY_FOLDER"] = trajectory_folder
+    # Set TASK_NAME if only one task (for trajectory matching)
+    if len(task_ids) == 1:
+        env["TASK_NAME"] = task_ids[0]
 
     cmd = [
         "harbor",

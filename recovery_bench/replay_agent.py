@@ -167,19 +167,15 @@ Set is_task_complete to true when you believe the task is finished.
             self._messages = [{"role": "system", "content": self._system_prompt}]
 
     def _find_trajectory_folder(self, task_description: str) -> Optional[Path]:
-        """Find the trajectory folder by task name or hash."""
+        """Find the trajectory folder. Uses TASK_NAME env var if set, otherwise first found."""
         base_path = Path(self._base_folder)
         
         if not base_path.exists():
+            print(f"Trajectory folder not found: {base_path}")
             return None
 
-        # Extract task name from instruction (usually first line or after "Task:")
-        task_name = None
-        for line in task_description.split('\n'):
-            # Common patterns: "Task: X" or just the task name
-            if line.strip().startswith("Task:"):
-                task_name = line.split(":", 1)[1].strip().split()[0]
-                break
+        # Check for explicit task name from env
+        target_task_name = os.getenv("TASK_NAME")
         
         # Search all directories
         for item in base_path.iterdir():
@@ -193,23 +189,31 @@ Set is_task_complete to true when you believe the task is finished.
             if not trajectory_file.exists():
                 continue
             
-            # Check result.json for task_name match
+            # If TASK_NAME is set, match by task_name from result.json
             result_file = item / "result.json"
             if result_file.exists():
                 try:
                     with open(result_file, "r") as f:
                         result = json.load(f)
                     stored_task_name = result.get("task_name", "")
-                    # Match if task_name appears in the instruction
-                    if stored_task_name and stored_task_name in task_description:
+                    
+                    if target_task_name:
+                        # Match against explicit task name
+                        if stored_task_name == target_task_name:
+                            print(f"Found trajectory for task {target_task_name}: {item}")
+                            return item
+                    else:
+                        # No explicit task name - return first valid trajectory
+                        print(f"Found trajectory: {item}")
                         return item
                 except (json.JSONDecodeError, FileNotFoundError):
                     pass
-            
-            # Fallback: check folder name contains task name pattern
-            if task_name and task_name in item.name:
+            elif not target_task_name:
+                # No result.json but trajectory exists - use it if no specific task requested
+                print(f"Found trajectory (no result.json): {item}")
                 return item
 
+        print(f"No matching trajectory found in {base_path}")
         return None
 
     def _read_trajectories(
