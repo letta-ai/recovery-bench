@@ -60,8 +60,8 @@ def get_unsolved_tasks(
         if not task_dir.is_dir():
             continue
 
-        # Look for results.json
-        results_file = task_dir / "results.json"
+        # Look for result.json (ATIF format)
+        results_file = task_dir / "result.json"
         if not results_file.exists():
             continue
             
@@ -71,36 +71,52 @@ def get_unsolved_tasks(
         except (FileNotFoundError, json.JSONDecodeError):
             continue
 
-        if results.get("is_resolved", False):
+        # Check if resolved - ATIF uses verifier_result.rewards.reward
+        # reward > 0 means resolved
+        verifier_result = results.get("verifier_result", {})
+        rewards = verifier_result.get("rewards", {})
+        reward = rewards.get("reward", 0.0)
+        if reward > 0:
+            if print_output:
+                print(f"Skipping {task_id}: resolved (reward={reward})")
             continue
 
-        # Count episodes from trajectory.json
-        episode_count = 0
-        trajectory_file = task_dir / "trajectory.json"
-        if trajectory_file.exists():
-            try:
-                with open(trajectory_file, "r") as f:
-                    trajectory = json.load(f)
-                episode_count = sum(
-                    1 for step in trajectory 
-                    if step.get("role") == "assistant"
-                )
-            except (json.JSONDecodeError, FileNotFoundError):
-                pass
-        else:
+        # Count episodes from agent_result metadata or trajectory
+        episode_count = results.get("agent_result", {}).get("metadata", {}).get("n_episodes", 0)
+        
+        # Fallback: count from trajectory.json
+        if episode_count == 0:
+            trajectory_file = task_dir / "agent" / "trajectory.json"
+            if not trajectory_file.exists():
+                trajectory_file = task_dir / "trajectory.json"
+            if trajectory_file.exists():
+                try:
+                    with open(trajectory_file, "r") as f:
+                        trajectory = json.load(f)
+                    steps = trajectory.get("steps", trajectory)
+                    episode_count = sum(
+                        1 for step in steps 
+                        if step.get("source") == "agent" or step.get("role") == "assistant"
+                    )
+                except (json.JSONDecodeError, FileNotFoundError):
+                    pass
+
+        if episode_count == 0:
             if print_output:
-                print(f"Skipping {task_dir}: no trajectory.json")
+                print(f"Skipping {task_id}: no episodes found")
             continue
 
         if (
             min_episodes_desired is not None
-            and episode_count > min_episodes_desired
+            and episode_count < min_episodes_desired
         ):
             if print_output:
-                print(f"Skipping {task_dir}: {episode_count} episodes > {min_episodes_desired}")
+                print(f"Skipping {task_id}: {episode_count} episodes < {min_episodes_desired}")
             continue
-            
-        unsolved_ids.append(results.get("task_id", task_id))
+        
+        # Extract task name from results
+        task_name = results.get("task_name", task_id)
+        unsolved_ids.append(task_name)
 
     if print_output:
         print(f"Found {len(unsolved_ids)} unsolved tasks")

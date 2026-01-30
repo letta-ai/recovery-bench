@@ -59,7 +59,7 @@ def generate_initial_traces(
             cmd.extend(["--task-name", task_id])
 
     run_command(cmd)
-    return f"runs/{run_id}"
+    return f"jobs/{run_id}"
 
 
 def run_replay_agent_for_unsolved(
@@ -91,7 +91,7 @@ def run_replay_agent_for_unsolved(
         n_concurrent=n_concurrent,
     )
 
-    return f"runs/{run_id}"
+    return f"jobs/{run_id}"
 
 
 def collect_all_traces(logs_dirs: List[str], output_dir: str, min_episodes: int = 10):
@@ -153,6 +153,12 @@ def main():
         dest="task_ids",
         help="Specific task ID(s) to run (can be specified multiple times)",
     )
+    parser.add_argument(
+        "--replay-model",
+        type=str,
+        default=None,
+        help="Model to use for replay agent (defaults to same as initial model)",
+    )
 
     args = parser.parse_args()
 
@@ -206,9 +212,10 @@ def main():
 
         # Run replay agent
         replay_run_id = f"replay-{model_short}-{timestamp}-iter{iteration}"
+        replay_model = args.replay_model or args.model_name
         replay_traces_dir = run_replay_agent_for_unsolved(
             current_traces_dir,
-            args.model_name,
+            replay_model,
             replay_run_id,
             args.min_episodes,
             args.n_concurrent,
@@ -225,7 +232,7 @@ def main():
         current_traces_dir = replay_traces_dir
 
     # Step 4: Collect all traces into single folder
-    collected_dir = f"runs/{model_short}-collected-{timestamp}"
+    collected_dir = f"jobs/{model_short}-collected-{timestamp}"
     collect_all_traces(all_trace_dirs, collected_dir, args.min_episodes)
 
     print(f"\n--- Pipeline completed successfully! ---")
