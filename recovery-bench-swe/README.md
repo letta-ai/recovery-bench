@@ -41,7 +41,7 @@ python -m recovery-bench-swe.src.generate_traces \
 - `--model`: LiteLLM compatible model (required)
 - `--subset`: SWEBench subset to use 
 - `--workers`: Number of concurrent processes for SWE-bench evaluation (optional, default = 4)
-- `--run_id` 0.0.2: Custom run identifer (required)
+- `--run_id`: Custom run identifer (required)
 
 Additionally, in the case generate_traces can't pull docker images, clean the populated instances with the --clean flag.
 
@@ -52,7 +52,7 @@ Use command from toplevel directory
 python -m recovery-bench-swe.src.run_mini_swe_agent \
   --trajectory-folder recovery-bench/recovery-swe-agent/swe-runs/openai__gpt-5-nano \
   --model-name openai/gpt-5 \
-  --run-id 0.0.3 \
+  --run-id 0.0.2 \
   --recovery-mode environment_only
 ```
 
