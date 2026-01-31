@@ -28,9 +28,9 @@ pip install mini-swe-agent
 python -m recovery-bench-swe.src.generate_traces \
   -- dataset` SWE-bench_Verified \
   -- num_trajs 50 \
-  -- model openai/gpt-5-nano` \
-  -- subset verified` \
-  -- workers 1 \
+  -- model openai/gpt-5-nano \
+  -- subset verified \
+  -- workers 4  \
   -- run_id 0.0.1
 ```
 
@@ -41,7 +41,7 @@ python -m recovery-bench-swe.src.generate_traces \
 - `--model`: LiteLLM compatible model (required)
 - `--subset`: SWEBench subset to use 
 - `--workers`: Number of concurrent processes for SWE-bench evaluation (optional, default = 4)
-- `run_id` 0.0.2: Custom run identifer (required)
+- `--run_id` 0.0.2: Custom run identifer (required)
 
 Additionally, in the case generate_traces can't pull docker images, clean the populated instances with the --clean flag.
 
