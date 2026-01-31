@@ -129,18 +129,63 @@ def is_hash_prefixed_directory(task_name: str) -> bool:
 
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
-    """Extract instruction from trajectory.json (ATIF format).
+    """Extract instruction from trajectory.json (ATIF format) or LettaCode events.
     
-    Strips the terminus-2 system prompt to return just the task description.
+    Supports:
+    1. ATIF trajectory.json (terminus-2 style)
+    2. LettaCode events JSONL + run_script.sh
     """
-    # Try agent/ subdirectory first (Harbor output structure)
-    trajectory_file = task_dir / "agent" / "trajectory.json"
-    if not trajectory_file.exists():
-        # Fall back to direct path
-        trajectory_file = task_dir / "trajectory.json"
-    if not trajectory_file.exists():
-        return None
+    agent_dir = task_dir / "agent"
     
+    # Try LettaCode format first (run_script.sh contains the instruction)
+    run_script = agent_dir / "run_script.sh" if agent_dir.exists() else None
+    if run_script and run_script.exists():
+        instruction = _extract_instruction_from_letta_script(run_script)
+        if instruction:
+            return instruction
+    
+    # Try ATIF trajectory.json
+    trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
+    if not trajectory_file or not trajectory_file.exists():
+        trajectory_file = task_dir / "trajectory.json"
+    if trajectory_file and trajectory_file.exists():
+        return _extract_instruction_from_atif(trajectory_file)
+    
+    return None
+
+
+def _extract_instruction_from_letta_script(run_script: Path) -> str | None:
+    """Extract instruction from LettaCode run_script.sh.
+    
+    The instruction is passed via -p flag: letta --new ... -p 'instruction'
+    """
+    try:
+        content = run_script.read_text()
+        
+        # Find -p 'instruction' or -p "instruction"
+        import re
+        # Match -p followed by quoted string (handles escaped quotes)
+        match = re.search(r"-p\s+'((?:[^'\\]|\\.|'\"'\"')*)'\s+--permission", content)
+        if match:
+            instruction = match.group(1)
+            # Unescape shell escapes
+            instruction = instruction.replace("'\"'\"'", "'")
+            return instruction
+        
+        # Try double quotes
+        match = re.search(r'-p\s+"((?:[^"\\]|\\.)*)"\s+--permission', content)
+        if match:
+            instruction = match.group(1)
+            instruction = instruction.replace('\\"', '"').replace("\\n", "\n")
+            return instruction
+        
+        return None
+    except Exception:
+        return None
+
+
+def _extract_instruction_from_atif(trajectory_file: Path) -> str | None:
+    """Extract instruction from ATIF trajectory.json."""
     try:
         with open(trajectory_file, "r") as f:
             trajectory = json.load(f)
@@ -172,7 +217,6 @@ def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
             terminal_marker = "\n\nCurrent terminal state:"
             if terminal_marker in task_part:
                 task_part = task_part.split(terminal_marker, 1)[0]
-            # Keep trailing newline to match raw instruction format
             return task_part
         
         return full_message
