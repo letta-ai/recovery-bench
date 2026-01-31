@@ -52,11 +52,21 @@ class ReplayLettaCode(LettaCode):
         # Look for hash-prefixed directories (format: <hash>-<task-id>__<suffix>/)
         for item in base_path.iterdir():
             if item.is_dir() and item.name.startswith(f"{task_hash}-"):
-                # Check agent/ subdirectory (Harbor output structure)
-                trajectory_file = item / "agent" / "trajectory.json"
-                if trajectory_file.exists():
+                agent_dir = item / "agent"
+                
+                # Check for LettaCode events JSONL
+                if agent_dir.exists():
+                    for f in agent_dir.iterdir():
+                        if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
+                            print(f"Found trajectory for hash {task_hash}: {item}")
+                            return item
+                
+                # Check for ATIF trajectory.json
+                trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
+                if trajectory_file and trajectory_file.exists():
                     print(f"Found trajectory for hash {task_hash}: {item}")
                     return item
+                
                 # Fall back to direct path
                 trajectory_file = item / "trajectory.json"
                 if trajectory_file.exists():
