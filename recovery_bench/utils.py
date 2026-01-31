@@ -77,7 +77,7 @@ def get_unsolved_tasks(
         # Count episodes from agent_result metadata or trajectory
         episode_count = results.get("agent_result", {}).get("metadata", {}).get("n_episodes", 0)
         
-        # Fallback: count from trajectory.json
+        # Fallback: count from trajectory.json (ATIF format)
         if episode_count == 0:
             trajectory_file = task_dir / "agent" / "trajectory.json"
             if not trajectory_file.exists():
@@ -93,6 +93,30 @@ def get_unsolved_tasks(
                     )
                 except (json.JSONDecodeError, FileNotFoundError):
                     pass
+
+        # Fallback: count from LettaCode events JSONL
+        if episode_count == 0:
+            agent_dir = task_dir / "agent"
+            if agent_dir.exists():
+                for f in agent_dir.iterdir():
+                    if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
+                        # Count unique tool calls as episodes
+                        try:
+                            tool_call_ids = set()
+                            with open(f, "r") as events_file:
+                                for line in events_file:
+                                    if line.strip().startswith("{"):
+                                        try:
+                                            event = json.loads(line.strip())
+                                            tool_call = event.get("tool_call", {})
+                                            if tool_call.get("tool_call_id"):
+                                                tool_call_ids.add(tool_call["tool_call_id"])
+                                        except json.JSONDecodeError:
+                                            pass
+                            episode_count = len(tool_call_ids)
+                        except Exception:
+                            pass
+                        break
 
         if episode_count == 0:
             if print_output:
