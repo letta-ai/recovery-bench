@@ -1,0 +1,22 @@
+{
+  "instance": "sphinx-doc__sphinx-10449",
+  "commands": [
+    "grep -RIn \"autodoc_typehints\" .",
+    "sed -n '1,220p' sphinx/ext/autodoc/typehints.py",
+    "python - << 'PY'\np = 'sphinx/ext/autodoc/typehints.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    s = f.read()\n\nold_block = (\n    \"            for param in sig.parameters.values():\\n\"\n    \"                if param.annotation is not param.empty:\\n\"\n    \"                    annotation[param.name] = typing.stringify(param.annotation, mode)\\n\"\n    \"            if sig.return_annotation is not sig.empty:\\n\"\n    \"                annotation['return'] = typing.stringify(sig.return_annotation, mode)\\n\"\n)\n\nnew_block = (\n    \"            for param in sig.parameters.values():\\n\"\n    \"                if param.annotation is not param.empty:\\n\"\n    \"                    annotation[param.name] = typing.stringify(param.annotation, mode)\\n\"\n    \"            # Do not record return type for __init__ to avoid showing class constructor return type\\n\"\n    \"            if getattr(obj, '__name__', '') != '__init__':\\n\"\n    \"                if sig.return_annotation is not sig.empty:\\n\"\n    \"                    annotation['return'] = typing.stringify(sig.return_annotation, mode)\\n\"\n)\n\nif old_block in s:\n    s = s.replace(old_block, new_block)\n    with open(p, 'w', encoding='utf-8') as f:\n        f.write(s)\nelse:\n    raise SystemExit(\"Patch target block not found; patch aborted.\")\nPY",
+    "nl -ba sphinx/ext/autodoc/typehints.py | sed -n '1,120p'",
+    "python -m py_compile sphinx/ext/autodoc/typehints.py",
+    "nl -ba sphinx/ext/autodoc/typehints.py | sed -n '23,36p'",
+    "python - << 'PY'\nfrom sphinx.ext.autodoc.typehints import record_typehints\nclass DummyConfig:\n    autodoc_typehints_format = 'short'\n    autodoc_type_aliases = {}\nclass DummyEnv:\n    def __init__(self):\n        self.temp_data = {}\nclass DummyApp:\n    def __init__(self):\n        self.config = DummyConfig()\n        self.env = DummyEnv()\n\ndef __init__(self, width: int, height: int) -> None:\n    pass\n\nobj = __init__\napp = DummyApp()\nrecord_typehints(app, 'class', 'Square', obj, {}, '', '')\nprint(app.env.temp_data)\nPY",
+    "python - << 'PY'\nfrom sphinx.ext.autodoc.typehints import record_typehints\nclass DummyConfig:\n    autodoc_typehints_format = 'short'\n    autodoc_type_aliases = {}\nclass DummyEnv:\n    def __init__(self):\n        self.temp_data = {}\nclass DummyApp:\n    def __init__(self):\n        self.config = DummyConfig()\n        self.env = DummyEnv()\n\ndef __init__(self, width: int, height: int) -> None:\n    pass\n\n# Test __init__ (should not record 'return')\nobj = __init__\napp = DummyApp()\nrecord_typehints(app, 'class', 'Square', obj, {}, '', '')\nprint(\"After __init__:\", app.env.temp_data)\n\n# Test regular function (should record 'return')\ndef bar(x: int) -> str:\n    return str(x)\nrecord_typehints(app, 'function', 'bar', bar, {}, '', '')\nprint(\"After function bar:\", app.env.temp_data)\nPY",
+    "pytest -q -k autodoc_typehints --maxfail=1",
+    "python - << 'PY'\np = 'sphinx/ext/autodoc/typehints.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    s = f.read()\ns2 = s.replace(\"if getattr(obj, '__name__', '') != '__init__':\",\n               \"if not isinstance(obj, type) and getattr(obj, '__name__', '') != '__init__':\")\nif s == s2:\n    print(\"No change\")\nelse:\n    with open(p, 'w', encoding='utf-8') as f:\n        f.write(s2)\n    print(\"Patched\")\nPY",
+    "pytest -q tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init",
+    "pytest -q tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init",
+    "git checkout -- sphinx/ext/autodoc/typehints.py",
+    "pytest -q tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init",
+    "pytest -q",
+    "pytest -q tests/test_ext_autodoc_configs.py -k \"documented_init\"",
+    "pytest -q tests/test_ext_autodoc_configs.py"
+  ]
+}

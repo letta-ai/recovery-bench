@@ -241,7 +241,9 @@ def get_unresolved_tasks(model: str, run_id: str):
 
     model_safe = model.replace('/', '__')
     filename = f"{model_safe}.{run_id}.json"
-    path = swe_root / filename
+
+    #Using parent of swe_root as filename populates the recovery-bench root dir
+    path = swe_root.parent / filename
     try:
         with open(str(path), "r") as f:
             data = json.load(f)
@@ -529,12 +531,6 @@ def main():
     )
 
     parser.add_argument(
-        "--organize",
-        action = "store_true",
-        help = "Organize working directory and dataset instead of generating trajectories",
-    )
-
-    parser.add_argument(
         "--clean",
         action = "store_true",
         help = "Clean swe-root directory from corrupted trajectories"
@@ -555,13 +551,10 @@ def main():
     workers = args.workers
     run_id = args.run_id
     
-    if args.organize:
-        return pred_and_org(test_data, model, workers, run_id)
     if args.clean:
         return clean_root(test_data, False)
-    result = gen_dirty_states(num_trajs, model, subset, workers)
-    print(result)
-    print("May or may not be waiting for dirty states to generate")
+    gen_dirty_states(num_trajs, model, subset, workers)
+    return pred_and_org(test_data, model, workers, run_id)
 
 
 if __name__ == "__main__":

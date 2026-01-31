@@ -1,0 +1,21 @@
+{
+  "instance": "django__django-16901",
+  "commands": [
+    "cd /testbed && ls -la && grep -Rni --include=\"*.py\" \"class Q\" . | head -n 20",
+    "sed -n '1,260p' django/db/models/query_utils.py",
+    "sed -n '1,400p' django/db/models/sql/query.py",
+    "grep -Rni --include=\"*.py\" \"XOR\" django | head -n 50",
+    "python - << 'PY'\nfrom pathlib import Path\np=Path('django/db/models/sql/where.py')\ns=p.read_text()\nstart = s.find('if self.connector == XOR')\nprint(start)\nprint(s[start-100:start+400])\nPY",
+    "sed -n '4810,4875p' django/db/models/sql/where.py",
+    "nl -ba django/db/models/sql/where.py | sed -n '4810,4920p'",
+    "python - << 'PY'\nfn=\"django/db/models/sql/where.py\"\nwith open(fn) as f:\n    lines=f.readlines()\nfor idx, line in enumerate(lines, start=1):\n    if \"if self.connector == XOR\" in line:\n        start=max(1, idx-60)\n        end=min(len(lines), idx+200)\n        print(''.join(lines[start-1:end]))\n        break\nelse:\n    print(\"not found\")\nPY",
+    "python - << 'PY'\n# Patch the XOR fallback in django/db/models/sql/where.py to use parity (mod 2) instead of \"exactly one\".\np = 'django/db/models/sql/where.py'\ntext = open(p, 'r').read()\n\nold_sub = \"\"\"if self.connector == XOR and not connection.features.supports_logical_xor:\n            # Convert if the database doesn't support XOR:\n            #   a XOR b XOR c XOR ...\n            # to:\n            #   (a OR b OR c OR ...) AND (a + b + c + ...) == 1\n            lhs = self.__class__(self.children, OR)\n            rhs_sum = reduce(\n                operator.add,\n                (Case(When(c, then=1), default=0) for c in self.children),\n            )\n            rhs = Exact(1, rhs_sum)\n            return self.__class__([lhs, rhs], AND, self.negated).as_sql(\n                compiler, connection\n            )\"\"\"\n\nnew_sub = \"\"\"if self.connector == XOR and not connection.features.supports_logical_xor:\n            # Convert if the database doesn't support XOR to parity:\n            #   a XOR b XOR c XOR ...\n            # to:\n            #   sum of booleans mod 2 == 1\n            lhs = self.__class__(self.children, OR)\n            rhs_sum = reduce(\n                operator.add,\n                (Case(When(c, then=1), default=0) for c in self.children),\n            )\n            from django.db.models.functions import Mod\n            parity_expr = Mod(rhs_sum, 2) == 1\n            return self.__class__([lhs, parity_expr], AND, self.negated).as_sql(\n                compiler, connection\n            )\"\"\"\n\nif old_sub in text:\n    text = text.replace(old_sub, new_sub)\nelse:\n    import re\n    pattern = re.compile(r\"if self\\.connector == XOR and not connection\\.features\\.supports_logical_xor:[\\s\\S]*?return self\\.__class__\\(\\[lhs, rhs\\], AND, self\\.negated\\)\\.as_sql\\(\\s*compiler,\\s*connection\\s*\\)\", re.M)\n    m = pattern.search(text)\n    if m:\n        text = text[:m.start()] + new_sub + text[m.end():]\n    else:\n        print(\"Patch region not found\", file=sys.stderr)\n        raise SystemExit(1)\n\nopen(p, 'w').write(text)\nprint(\"patched\")\nPY",
+    "cd /testbed && python -m py_compile $(git ls-files \"*.py\")",
+    "python -m py_compile $(git ls-files \"*.py\" | grep -v '^tests/')",
+    "cd /testbed && python -m py_compile django/db/models/sql/where.py",
+    "cd /testbed && python -m py_compile django/db/models/sql/where.py && echo OK",
+    "git diff -- django/db/models/sql/where.py",
+    "grep -n \"parity_expr\" django/db/models/sql/where.py",
+    "cd /testbed && python -m py_compile django/db/models/sql/where.py && echo OK"
+  ]
+}

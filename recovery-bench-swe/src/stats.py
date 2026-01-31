@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from collections import Counter
 from pathlib import Path
-from swe_utils import get_data
+from .swe_utils import get_data
 from .generate_traces import (get_runs_dir, get_swe_root_dir, cat_dir_and_model)
 #from recovery_bench_swe.src.generate_traces import (get_runs_dir, get_swe_root_dir, cat_dir_and_model)
 from swebench.harness.run_evaluation import main as run_swe_bench
@@ -444,7 +444,7 @@ def plot(baseline_pct, recovery_pct):
     fig.patch.set_facecolor('#1a1a1a')
     ax.set_facecolor('#1a1a1a')
 
-    labels = ["Clean (baseline)", "Dirty (recovery)"]
+    labels = ["Clean (default)", "Dirty (recovery)"]
     values = [baseline_pct, recovery_pct]
     
     # Colors matching the reference style
@@ -522,7 +522,7 @@ def plot(baseline_pct, recovery_pct):
 
     plt.tight_layout(rect=[0, 0.02, 1, 0.92])
     
-    out_path = get_swe_root_dir() / "recovery_vs_baseline(1).png"
+    out_path = get_swe_root_dir() / "recovery_vs_baseline.png"
     plt.savefig(out_path, dpi=200, facecolor='#1a1a1a', edgecolor='none')
     plt.close(fig)
 

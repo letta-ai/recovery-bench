@@ -1,0 +1,17 @@
+{
+  "instance": "django__django-14608",
+  "commands": [
+    "grep -RIn \"ErrorList|nonfield|FormSet\" .",
+    "grep -RInE \"ErrorList|nonfield|FormSet|FormSets|formset|nonform\" .",
+    "sed -n '1,260p' django/forms/formsets.py",
+    "grep -nR \"non_form|nonform|NON_FORM|non_form_errors\" django/forms/formsets.py",
+    "grep -nR \"def non_form_errors\" django/forms/formsets.py",
+    "python - << 'PY'\nfrom pathlib import Path\n\np = Path('django/forms/formsets.py')\ntext = p.read_text()\n\n# 1) Insert NonFormErrorList class if not present\nif 'class NonFormErrorList' not in text:\n    insert_after = text.find('DEFAULT_MAX_NUM = 1000')\n    if insert_after != -1:\n        line_end = text.find('\\n', insert_after)\n        class_def = \"\"\"\n\n\nclass NonFormErrorList(ErrorList):\n    def as_ul(self):\n        ul = super().as_ul()\n        if not ul:\n            return ul\n        return ul.replace('class=\\\"errorlist\\\"', 'class=\\\"errorlist nonform\\\"')\n\"\"\"\n        text = text[:line_end+1] + class_def + text[line_end+1:]\n        p.write_text(text)\n        print(\"Inserted NonFormErrorList class.\")\n    else:\n        print(\"Could not locate insertion point for NonFormErrorList class.\")\nelse:\n    print(\"NonFormErrorList class already present.\")\n\n# 2) Wrap _non_form_errors with NonFormErrorList in non_form_errors method\ntext = p.read_text()\nstart = text.find('def non_form_errors(self):')\nif start != -1:\n    # Insert a wrapper after the function's def line to ensure wrapping happens early\n    line_end = text.find('\\n', start) + 1\n    wrapper = \"        if self._non_form_errors is not None and not isinstance(self._non_form_errors, NonFormErrorList):\\n            self._non_form_errors = NonFormErrorList(self._non_form_errors)\\n\"\n    if 'NonFormErrorList' in text and wrapper.strip() not in text:\n        text = text[:line_end] + wrapper + text[line_end:]\n        p.write_text(text)\n        print(\"Patched non_form_errors to wrap with NonFormErrorList.\")\n    else:\n        print(\"Wrapper already present or class missing.\")\nelse:\n    print(\"non_form_errors function not found.\")\nPY",
+    "python -m py_compile django/forms/formsets.py",
+    "pytest -q tests/model_formsets/tests.py",
+    "python - << 'PY'\nimport ast, sys\np = 'django/forms/formsets.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    src = f.read()\ntry:\n    ast.parse(src, filename=p)\n    print(\"OK: syntax seems valid\")\nexcept SyntaxError as e:\n    print(\"SyntaxError:\", e)\n    sys.exit(1)\nPY",
+    "python - << 'PY'\np = 'django/forms/formsets.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    t = f.read()\ncond1 = 'class NonFormErrorList' in t\ncond2 = 'def non_form_errors' in t and 'self._non_form_errors' in t and 'NonFormErrorList' in t\nprint('OK' if (cond1 and cond2) else 'ERROR', 'NonFormErrorList=', cond1, 'non_form_errors wrapper=', cond2)\nPY",
+    "git add -A && git diff --cached",
+    "git commit -m 'formsets: add NonFormErrorList class and wrap non_form_errors to render \"nonform\" CSS class for non-form errors'"
+  ]
+}

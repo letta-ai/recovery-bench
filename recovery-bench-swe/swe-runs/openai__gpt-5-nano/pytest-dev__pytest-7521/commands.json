@@ -1,0 +1,19 @@
+{
+  "instance": "pytest-dev__pytest-7521",
+  "commands": [
+    "ls -la",
+    "grep -RIn \"capfd|readouterr|capture\" src testing | head -n 200",
+    "grep -RIn \"capfd|readouterr|FDCapture|TextIOWrapper|universal\" src | head -n 200",
+    "ls -la src && ls -la testing",
+    "grep -RIn \"def readouterr|class FDCapture|capfd|TextIOWrapper|readouterr\" src/_pytest | head -n 200",
+    "grep -RIn \"def readouterr|class FDCapture|capfd|TextIOWrapper|newline|readouterr\" src/_pytest | head -n 200",
+    "ls -la src/_pytest && [ -d src/_pytest/capture ] && ls -la src/_pytest/capture && grep -RIn \"readouterr|FDCapture|capfd|TextIOWrapper|newline\" src/_pytest 2>/dev/null | head -n 200",
+    "sed -n '1,260p' src/_pytest/capture.py",
+    "sed -n '260,640p' src/_pytest/capture.py",
+    "grep -n \"write_through=True\" src/_pytest/capture.py && grep -n \"newline=\\\"\\\"\" src/_pytest/capture.py",
+    "python - << 'PY'\nfrom pathlib import Path\np = Path('src/_pytest/capture.py')\nlines = p.read_text().splitlines(True)\nindices = [i for i, line in enumerate(lines) if 'write_through=True' in line]\nfor idx in sorted(indices, reverse=True):\n    if idx+1 < len(lines) and 'newline=\"\"' in lines[idx+1]:\n        continue\n    indent = lines[idx][:lines[idx].index('write_through')]\n    lines.insert(idx+1, indent + 'newline=\"\",\\n')\np.write_text(''.join(lines))\nprint(\"Patched_all\")\nPY",
+    "bash -lc 'n1=$(grep -n \"write_through=True\" src/_pytest/capture.py | wc -l); n2=$(grep -n \"newline=\\\"\\\"\" src/_pytest/capture.py | wc -l); if [ \"$n1\" -gt 0 ] && [ \"$n2\" -ge \"$n1\" ]; then echo \"OK: found $n1 write_through and $n2 newline occurrences\"; else echo \"FAIL: mismatch: write_through=$n1 newline=$n2\"; fi'",
+    "python - << 'PY'\nimport sys\np = 'src/_pytest/capture.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    lines = f.readlines()\nok = True\nfor i, line in enumerate(lines):\n    if 'write_through=True' in line:\n        has_inside = 'newline=\"\"' in line\n        has_next = i+1 < len(lines) and 'newline=\"\"' in lines[i+1]\n        if not (has_inside or has_next):\n            print(f\"Violation at line {i+1}: {line.strip()}\")\n            ok = False\n            break\nprint(\"ALL_OK\" if ok else \"VIOLATION\")\nsys.exit(0 if ok else 1)\nPY",
+    "python - << 'PY'\nimport sys\np = 'src/_pytest/capture.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    lines = f.readlines()\nok = True\nfor i, line in enumerate(lines):\n    if 'write_through=True' in line:\n        if i+1 >= len(lines) or 'newline=\"\"' not in lines[i+1]:\n            ok = False\n            break\nprint(\"ALL_OK\" if ok else \"VIOLATION\")\nsys.exit(0 if ok else 1)\nPY"
+  ]
+}

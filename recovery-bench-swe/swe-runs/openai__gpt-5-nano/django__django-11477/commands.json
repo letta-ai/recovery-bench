@@ -1,0 +1,12 @@
+{
+  "instance": "django__django-11477",
+  "commands": [
+    "rg -n -S \"def translate_url|translate_url\\(\" -uu",
+    "grep -Rni --exclude-dir=\".git\" \"translate_url\" .",
+    "sed -n '1,260p' django/urls/base.py",
+    "sed -n '1,240p' tests/i18n/patterns/tests.py",
+    "sed -n '1,260p' i18n.patterns.urls.default/__init__.py",
+    "ls -la tests/i18n/patterns",
+    "python - <<'PY'\np = \"django/urls/base.py\"\nimport io, sys\nwith open(p, 'r', encoding='utf-8') as f:\n    s = f.read()\n\nold = \"\"\"        with override(lang_code):\n            try:\n                url = reverse(to_be_reversed, args=match.args, kwargs=match.kwargs)\n            except NoReverseMatch:\n                pass\n            else:\n                url = urlunsplit((parsed.scheme, parsed.netloc, url, parsed.query, parsed.fragment))\"\"\"\n\nnew = \"\"\"        with override(lang_code):\n            try:\n                url = reverse(to_be_reversed, args=getattr(match, 'args', []), kwargs=getattr(match, 'kwargs', {}))\n            except NoReverseMatch:\n                # Try without kwargs to handle optional groups missing in translation\n                try:\n                    url = reverse(to_be_reversed, args=getattr(match, 'args', []), kwargs={})\n                except NoReverseMatch:\n                    pass\n            else:\n                url = urlunsplit((parsed.scheme, parsed.netloc, url, parsed.query, parsed.fragment))\"\"\"\n\nif old in s:\n    s = s.replace(old, new)\nelse:\n    print(\"Expected patch block not found. Abort.\", file=sys.stderr)\n    sys.exit(2)\n\nwith open(p, 'w', encoding='utf-8') as f:\n    f.write(s)\nprint(\"Patched translate_url with kwargs fallback.\")\nPY"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "instance": "django__django-11749",
+  "commands": [
+    "ls -la",
+    "grep -Rni --include='*.py' \"def call_command\" django | head -n 20",
+    "sed -n '1,200p' django/core/management/__init__.py",
+    "python - <<'PY'\np = 'django/core/management/__init__.py'\nimport sys\nwith open(p, 'r') as f:\n    s = f.read()\n\nanchor = \"    # Any required arguments which are passed in via **options must be passed\\n    # to parse_args().\\n    parse_args += [\"\nidx = s.find(anchor)\nif idx == -1:\n    sys.stderr.write(\"Anchor not found; abort patch.\\\\n\")\n    sys.exit(1)\nparse_args_pos = s.find(\"    parse_args +=\", idx)\nif parse_args_pos == -1:\n    sys.stderr.write(\"Parse_args line not found; abort patch.\\\\n\")\n    sys.exit(1)\n\ninsertion = (\n\"    # Build a set of destinations that are part of a required mutually exclusive group\\\\n\"\n\"    required_group_dests = set()\\\\n\"\n\"    for group in getattr(parser, '_mutually_exclusive_groups', []):\\\\n\"\n\"        if getattr(group, 'required', False):\\\\n\"\n\"            for gopt in getattr(group, '_group_actions', []):\\\\n\"\n\"                if getattr(gopt, 'dest', None):\\\\n\"\n\"                    required_group_dests.add(gopt.dest)\\\\n\"\n)\n\ns = s[:parse_args_pos] + insertion + s[parse_args_pos:]\n\nwith open(p, 'w') as f:\n    f.write(s)\n\nprint(\"Patched django/core/management/__init__.py\")\nPY",
+    "python - <<'PY'\np='django/core/management/__init__.py'\nimport sys\nwith open(p, 'r') as f:\n    s=f.read()\ns2 = s.replace(\n    \"for opt in parser_actions if opt.required and opt.dest in options\",\n    \"for opt in parser_actions if (opt.required or opt.dest in required_group_dests) and opt.dest in options\"\n)\nwith open(p, 'w') as f:\n    f.write(s2)\nprint(\"Patched parse_args to include required_group_dests\")\nPY",
+    "python -m py_compile django/core/management/__init__.py",
+    "git checkout HEAD~1 -- django/core/management/__init__.py",
+    "git checkout HEAD -- django/core/management/__init__.py",
+    "python -m py_compile django/core/management/__init__.py"
+  ]
+}

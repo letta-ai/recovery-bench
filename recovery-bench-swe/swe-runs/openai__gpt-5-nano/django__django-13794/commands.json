@@ -1,0 +1,13 @@
+{
+  "instance": "django__django-13794",
+  "commands": [
+    "ls -la && grep -RIn \"def add|register.filter|@register.filter|add filter|template.Filter\" . -S || true",
+    "grep -RIn \"def add\" django | head -n 1",
+    "grep -nR \"def add(\" django/template/defaultfilters.py",
+    "python3 - <<'PY'\nimport re\np = 'django/template/defaultfilters.py'\nwith open(p, 'r', encoding='utf-8') as f:\n    s = f.read()\n\n# Replace the entire add(value, arg) function with a robust version\npattern = r'(?ms)^def\\s+add\\(value,\\s*arg\\):.*?(?=^\\s*def\\s|\\Z)'\nnew = (\n    'def add(value, arg):\\n'\n    '    try:\\n'\n    '        return value + arg\\n'\n    '    except TypeError:\\n'\n    '        return str(value) + str(arg)\\n'\n)\n\nif re.search(pattern, s):\n    s2 = re.sub(pattern, new, s, count=1)\nelse:\n    # Fallback: simple replacement if pattern not found due to formatting\n    s2 = s.replace('def add(value, arg):\\n    return value + arg\\n', new)\n\nwith open(p, 'w', encoding='utf-8') as f:\n    f.write(s2)\n\nprint('patched')\nPY",
+    "python3 - <<'PY'\nfrom django.template.defaultfilters import add\nclass Dummy:\n    def __str__(self):\n        return \"DUMMY\"\nprint(\"case1:\", add(\"hello\", Dummy()))\nprint(\"case2:\", add(Dummy(), \"world\"))\nprint(\"case3:\", add(Dummy(), Dummy()))\nprint(\"case4:\", add(\"a\", \"b\"))\nPY",
+    "python3 - <<'PY'\nfrom django.template.defaultfilters import add\nclass Dummy:\n    def __str__(self):\n        return \"DUMMY\"\ndef show(a,b):\n    try:\n        return add(a,b)\n    except Exception as e:\n        return f\"EX-{type(e).__name__}:{e}\"\ntests = [\n    (\"1\",\"2\"),\n    (\"1\",2),\n    (1,\"2\"),\n    (None,\"x\"),\n    (Dummy(), Dummy()),\n    (1,2)\n]\nfor a,b in tests:\n    print(f\"{a!r} + {b!r} -> {show(a,b)!r}\")\nPY",
+    "git diff django/template/defaultfilters.py",
+    "python3 - <<'PY'\nfrom django.template.defaultfilters import add\nclass Dummy:\n    def __str__(self):\n        return \"DUMMY\"\ntests = [\n    (\"hello\", Dummy()),\n    (Dummy(), \"world\"),\n    (Dummy(), Dummy()),\n    (1, 2),\n    (None, \"x\"),\n    (\"a\", \"b\"),\n]\nfor a,b in tests:\n    try:\n        res = add(a,b)\n    except Exception as e:\n        res = f\"EX-{type(e).__name__}:{e}\"\n    print(f\"{a!r} + {b!r} -> {res!r}\")\nPY"
+  ]
+}

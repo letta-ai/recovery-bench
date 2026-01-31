@@ -376,7 +376,7 @@ def run_default_agent_swe(
         trajectory_folder: Path, 
         model: str, 
         run_id: str, 
-        max_workers: int = 1
+        max_workers: int = 4
     ) -> int:
     """
     Core algorithm for running the default swe agent
@@ -545,7 +545,7 @@ def run_replay_agent_swe(
     model: str, 
     run_id: str, 
     recovery_mode: str = "full_history",
-    max_workers: int = 1
+    max_workers: int = 4
 ) -> int:
     """
     Core algorithm for running the recovery/replay swe agent
