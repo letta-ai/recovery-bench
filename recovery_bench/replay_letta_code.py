@@ -163,8 +163,14 @@ class ReplayLettaCode(LettaCode):
         operations = []
         import re
         
-        # Tools that modify environment state
-        state_modifying_tools = {"Bash", "Write", "Edit"}
+        # Tools that modify environment state (across all providers)
+        # Anthropic: Bash, Write, Edit
+        # OpenAI/Codex: ShellCommand, Shell, shell_command, shell, ApplyPatch, apply_patch
+        # Gemini: RunShellCommand, run_shell_command, WriteFileGemini, write_file_gemini, Replace, replace
+        shell_tools = {"Bash", "ShellCommand", "Shell", "shell_command", "shell", "RunShellCommand", "run_shell_command"}
+        write_tools = {"Write", "WriteFileGemini", "write_file_gemini"}
+        edit_tools = {"Edit", "ApplyPatch", "apply_patch", "Replace", "replace"}
+        state_modifying_tools = shell_tools | write_tools | edit_tools
         
         for tool_call_id in tool_call_order:
             tool_name = tool_call_names.get(tool_call_id, "")
@@ -173,6 +179,16 @@ class ReplayLettaCode(LettaCode):
             
             fragments = tool_call_fragments[tool_call_id]
             full_args = "".join(fragments)
+            
+            # Normalize tool name to canonical operation type
+            if tool_name in shell_tools:
+                canonical_tool = "Bash"
+            elif tool_name in write_tools:
+                canonical_tool = "Write"
+            elif tool_name in edit_tools:
+                canonical_tool = "Edit"
+            else:
+                continue
             
             # Try full JSON parse first
             args_obj = None
@@ -183,7 +199,7 @@ class ReplayLettaCode(LettaCode):
                 args_obj = self._extract_args_regex(tool_name, full_args)
             
             if args_obj:
-                operations.append({"tool": tool_name, "args": args_obj})
+                operations.append({"tool": canonical_tool, "args": args_obj, "original_tool": tool_name})
 
         bash_count = sum(1 for op in operations if op["tool"] == "Bash")
         write_count = sum(1 for op in operations if op["tool"] == "Write")
@@ -192,36 +208,58 @@ class ReplayLettaCode(LettaCode):
         return operations
 
     def _extract_args_regex(self, tool_name: str, full_args: str) -> dict | None:
-        """Extract tool arguments using regex for incomplete JSON."""
+        """Extract tool arguments using regex for incomplete JSON.
+        
+        Handles different argument names across providers:
+        - Shell: command (all providers)
+        - Write: file_path+content (Anthropic), file_path+content (Gemini)
+        - Edit: file_path+old_string+new_string (Anthropic), patch (Codex), 
+                file_path+old_str+new_str or find+replace (Gemini)
+        """
         import re
         
         def unescape(s: str) -> str:
             return s.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
         
-        if tool_name == "Bash":
-            match = re.search(r'"command":\s*"((?:[^"\\]|\\.)*)"', full_args)
-            if match:
-                return {"command": unescape(match.group(1))}
+        def extract_field(pattern: str) -> str | None:
+            match = re.search(pattern, full_args)
+            return unescape(match.group(1)) if match else None
         
-        elif tool_name == "Write":
-            file_match = re.search(r'"file_path":\s*"((?:[^"\\]|\\.)*)"', full_args)
-            content_match = re.search(r'"content":\s*"((?:[^"\\]|\\.)*)"', full_args)
-            if file_match and content_match:
-                return {
-                    "file_path": unescape(file_match.group(1)),
-                    "content": unescape(content_match.group(1))
-                }
+        # Shell tools (Bash, ShellCommand, Shell, RunShellCommand, etc.)
+        shell_tools = {"Bash", "ShellCommand", "Shell", "shell_command", "shell", "RunShellCommand", "run_shell_command"}
+        if tool_name in shell_tools:
+            command = extract_field(r'"command":\s*"((?:[^"\\]|\\.)*)"')
+            if command:
+                return {"command": command}
         
-        elif tool_name == "Edit":
-            file_match = re.search(r'"file_path":\s*"((?:[^"\\]|\\.)*)"', full_args)
-            old_match = re.search(r'"old_string":\s*"((?:[^"\\]|\\.)*)"', full_args)
-            new_match = re.search(r'"new_string":\s*"((?:[^"\\]|\\.)*)"', full_args)
-            if file_match and old_match and new_match:
-                return {
-                    "file_path": unescape(file_match.group(1)),
-                    "old_string": unescape(old_match.group(1)),
-                    "new_string": unescape(new_match.group(1))
-                }
+        # Write tools (Write, WriteFileGemini, write_file_gemini)
+        write_tools = {"Write", "WriteFileGemini", "write_file_gemini"}
+        if tool_name in write_tools:
+            file_path = extract_field(r'"file_path":\s*"((?:[^"\\]|\\.)*)"')
+            content = extract_field(r'"content":\s*"((?:[^"\\]|\\.)*)"')
+            if file_path and content is not None:
+                return {"file_path": file_path, "content": content}
+        
+        # Edit tools (Edit, ApplyPatch, apply_patch, Replace, replace)
+        edit_tools = {"Edit", "ApplyPatch", "apply_patch", "Replace", "replace"}
+        if tool_name in edit_tools:
+            # Try Anthropic format: file_path + old_string + new_string
+            file_path = extract_field(r'"file_path":\s*"((?:[^"\\]|\\.)*)"')
+            old_string = extract_field(r'"old_string":\s*"((?:[^"\\]|\\.)*)"')
+            new_string = extract_field(r'"new_string":\s*"((?:[^"\\]|\\.)*)"')
+            if file_path and old_string is not None and new_string is not None:
+                return {"file_path": file_path, "old_string": old_string, "new_string": new_string}
+            
+            # Try Gemini Replace format: file_path + old_str + new_str
+            old_str = extract_field(r'"old_str":\s*"((?:[^"\\]|\\.)*)"')
+            new_str = extract_field(r'"new_str":\s*"((?:[^"\\]|\\.)*)"')
+            if file_path and old_str is not None and new_str is not None:
+                return {"file_path": file_path, "old_string": old_str, "new_string": new_str}
+            
+            # Try Codex ApplyPatch format: patch (unified diff)
+            patch = extract_field(r'"patch":\s*"((?:[^"\\]|\\.)*)"')
+            if patch:
+                return {"patch": patch}
         
         return None
 
@@ -348,13 +386,32 @@ class ReplayLettaCode(LettaCode):
                     Path(local_path).unlink(missing_ok=True)
         
         elif tool == "Edit":
-            file_path = args.get("file_path", "")
-            old_string = args.get("old_string", "")
-            new_string = args.get("new_string", "")
-            if file_path and old_string:
-                # Use sed for simple string replacement
-                # Escape special characters for sed
-                old_escaped = old_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
-                new_escaped = new_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
-                sed_cmd = f"sed -i 's/{old_escaped}/{new_escaped}/g' {shlex.quote(file_path)}"
-                await environment.exec(f"bash -lc {shlex.quote(sed_cmd)}", timeout_sec=30)
+            # Check for patch format (Codex ApplyPatch)
+            patch = args.get("patch", "")
+            if patch:
+                # Apply unified diff patch
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".patch") as tmpf:
+                    tmpf.write(patch)
+                    local_patch = tmpf.name
+                try:
+                    remote_patch = "/tmp/replay_patch.patch"
+                    await environment.upload_file(local_patch, remote_patch)
+                    await environment.exec(
+                        f"bash -lc 'patch -p1 < {remote_patch} || true'",
+                        timeout_sec=30,
+                    )
+                finally:
+                    Path(local_patch).unlink(missing_ok=True)
+            else:
+                # String replacement format (Anthropic Edit, Gemini Replace)
+                file_path = args.get("file_path", "")
+                old_string = args.get("old_string", "")
+                new_string = args.get("new_string", "")
+                if file_path and old_string:
+                    # Use sed for simple string replacement
+                    # Escape special characters for sed
+                    old_escaped = old_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
+                    new_escaped = new_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
+                    sed_cmd = f"sed -i 's/{old_escaped}/{new_escaped}/g' {shlex.quote(file_path)}"
+                    await environment.exec(f"bash -lc {shlex.quote(sed_cmd)}", timeout_sec=30)
