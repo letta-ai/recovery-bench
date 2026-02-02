@@ -243,6 +243,12 @@ class LettaCode(BaseInstalledAgent):
                     (logs_dir / f"letta_agent_export_{ts}.af").write_bytes(agent_bytes)
                 except Exception:
                     pass
+            
+            # Fallback: extract agent ID from events file if not found in settings
+            if not agent_id:
+                agent_id = self._extract_agent_id_from_events(logs_dir, ts)
+                if agent_id:
+                    (logs_dir / f"letta_agent_id_{ts}.txt").write_text(str(agent_id))
         except Exception:
             pass
 
@@ -255,3 +261,26 @@ class LettaCode(BaseInstalledAgent):
 
         if run_error is not None:
             raise run_error
+
+    def _extract_agent_id_from_events(self, logs_dir: Path, ts: str) -> str | None:
+        """Extract agent ID from events JSONL file as fallback."""
+        events_file = logs_dir / f"letta_events_{ts}.jsonl"
+        if not events_file.exists():
+            return None
+        
+        try:
+            with open(events_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line.startswith("{"):
+                        continue
+                    try:
+                        event = json.loads(line)
+                        agent_id = event.get("agent_id")
+                        if agent_id and agent_id.startswith("agent-"):
+                            return agent_id
+                    except json.JSONDecodeError:
+                        continue
+        except Exception:
+            pass
+        return None
