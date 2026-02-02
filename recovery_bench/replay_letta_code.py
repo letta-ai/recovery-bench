@@ -76,12 +76,14 @@ class ReplayLettaCode(LettaCode):
         print(f"No trajectory found for hash {task_hash} in {base_path}")
         return None
 
-    def _extract_commands_from_trajectory(self, instruction: str) -> list[str]:
-        """Extract bash commands from a failed trajectory.
+    def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
+        """Extract state-modifying operations from a failed trajectory.
         
         Supports two formats:
         1. LettaCode events JSONL (letta_events_*.jsonl)
         2. ATIF trajectory.json (for terminus-2 style agents)
+        
+        Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
         """
         task_hash = create_task_hash(instruction)
         print(f"Looking for trajectory with hash: {task_hash}")
@@ -95,31 +97,36 @@ class ReplayLettaCode(LettaCode):
         if agent_dir.exists():
             for f in agent_dir.iterdir():
                 if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                    commands = self._parse_letta_events(f)
-                    if commands:
-                        return commands
+                    operations = self._parse_letta_events(f)
+                    if operations:
+                        return operations
 
-        # Fall back to ATIF trajectory.json
+        # Fall back to ATIF trajectory.json (only extracts Bash commands)
         trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
         if not trajectory_file or not trajectory_file.exists():
             trajectory_file = trajectory_folder / "trajectory.json"
         if trajectory_file and trajectory_file.exists():
-            return self._parse_atif_trajectory(trajectory_file)
+            commands = self._parse_atif_trajectory(trajectory_file)
+            # Convert to operation format
+            return [{"tool": "Bash", "args": {"command": cmd}} for cmd in commands]
 
         print(f"No trajectory found in {trajectory_folder}")
         return []
 
-    def _parse_letta_events(self, events_file: Path) -> list[str]:
-        """Parse LettaCode events JSONL to extract bash commands.
+    def _parse_letta_events(self, events_file: Path) -> list[dict]:
+        """Parse LettaCode events JSONL to extract operations that modify state.
         
+        Extracts Bash, Write, and Edit tool calls that could corrupt the environment.
         Events are streamed as JSON fragments grouped by tool_call_id.
-        We need to concatenate fragments and parse to get the command.
+        
+        Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
         """
         print(f"Parsing LettaCode events from {events_file}")
         
-        # Collect argument fragments by tool_call_id
+        # Collect argument fragments by tool_call_id (preserving order)
         tool_call_fragments: dict[str, list[str]] = {}
         tool_call_names: dict[str, str] = {}
+        tool_call_order: list[str] = []  # Track order of first appearance
         
         try:
             with open(events_file, "r") as f:
@@ -146,43 +153,77 @@ class ReplayLettaCode(LettaCode):
                             if tool_call_id not in tool_call_fragments:
                                 tool_call_fragments[tool_call_id] = []
                                 tool_call_names[tool_call_id] = tool_name
+                                tool_call_order.append(tool_call_id)
                             tool_call_fragments[tool_call_id].append(args_fragment)
         except Exception as e:
             print(f"Error parsing events file: {e}")
             return []
 
-        # Reconstruct and extract bash commands
-        commands = []
+        # Reconstruct and extract operations (Bash, Write, Edit)
+        operations = []
         import re
-        for tool_call_id, fragments in tool_call_fragments.items():
+        
+        # Tools that modify environment state
+        state_modifying_tools = {"Bash", "Write", "Edit"}
+        
+        for tool_call_id in tool_call_order:
             tool_name = tool_call_names.get(tool_call_id, "")
-            if tool_name != "Bash":
+            if tool_name not in state_modifying_tools:
                 continue
             
-            # Concatenate fragments to get full JSON
+            fragments = tool_call_fragments[tool_call_id]
             full_args = "".join(fragments)
             
             # Try full JSON parse first
+            args_obj = None
             try:
                 args_obj = json.loads(full_args)
-                command = args_obj.get("command", "")
-                if command and command.strip():
-                    commands.append(command.strip())
-                    continue
             except json.JSONDecodeError:
-                pass
+                # Fallback: extract with regex for incomplete JSON
+                args_obj = self._extract_args_regex(tool_name, full_args)
             
-            # Fallback: extract command with regex (handles incomplete JSON)
+            if args_obj:
+                operations.append({"tool": tool_name, "args": args_obj})
+
+        bash_count = sum(1 for op in operations if op["tool"] == "Bash")
+        write_count = sum(1 for op in operations if op["tool"] == "Write")
+        edit_count = sum(1 for op in operations if op["tool"] == "Edit")
+        print(f"Extracted {len(operations)} operations: {bash_count} Bash, {write_count} Write, {edit_count} Edit")
+        return operations
+
+    def _extract_args_regex(self, tool_name: str, full_args: str) -> dict | None:
+        """Extract tool arguments using regex for incomplete JSON."""
+        import re
+        
+        def unescape(s: str) -> str:
+            return s.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+        
+        if tool_name == "Bash":
             match = re.search(r'"command":\s*"((?:[^"\\]|\\.)*)"', full_args)
             if match:
-                cmd = match.group(1)
-                # Unescape common escape sequences
-                cmd = cmd.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-                if cmd.strip():
-                    commands.append(cmd.strip())
-
-        print(f"Extracted {len(commands)} bash commands from LettaCode events")
-        return commands
+                return {"command": unescape(match.group(1))}
+        
+        elif tool_name == "Write":
+            file_match = re.search(r'"file_path":\s*"((?:[^"\\]|\\.)*)"', full_args)
+            content_match = re.search(r'"content":\s*"((?:[^"\\]|\\.)*)"', full_args)
+            if file_match and content_match:
+                return {
+                    "file_path": unescape(file_match.group(1)),
+                    "content": unescape(content_match.group(1))
+                }
+        
+        elif tool_name == "Edit":
+            file_match = re.search(r'"file_path":\s*"((?:[^"\\]|\\.)*)"', full_args)
+            old_match = re.search(r'"old_string":\s*"((?:[^"\\]|\\.)*)"', full_args)
+            new_match = re.search(r'"new_string":\s*"((?:[^"\\]|\\.)*)"', full_args)
+            if file_match and old_match and new_match:
+                return {
+                    "file_path": unescape(file_match.group(1)),
+                    "old_string": unescape(old_match.group(1)),
+                    "new_string": unescape(new_match.group(1))
+                }
+        
+        return None
 
     def _parse_atif_trajectory(self, trajectory_file: Path) -> list[str]:
         """Parse ATIF trajectory.json to extract commands (terminus-2 style)."""
@@ -241,32 +282,27 @@ class ReplayLettaCode(LettaCode):
         """
         Run the replay LettaCode agent.
         
-        1. Extract commands from failed trajectory
-        2. Replay commands to corrupt the environment
+        1. Extract operations from failed trajectory (Bash, Write, Edit)
+        2. Replay operations to corrupt the environment
         3. Run LettaCode with recovery instruction
         """
-        # 1. Extract commands from failed trajectory
-        commands = self._extract_commands_from_trajectory(instruction)
+        # 1. Extract operations from failed trajectory
+        operations = self._extract_operations_from_trajectory(instruction)
         
-        if not commands:
-            print("No commands found in trajectory, running LettaCode fresh")
+        if not operations:
+            print("No operations found in trajectory, running LettaCode fresh")
         else:
-            # 2. Replay commands to corrupt the environment
-            print(f"Replaying {len(commands)} commands from previous trajectory...")
-            for i, cmd in enumerate(commands):
+            # 2. Replay operations to corrupt the environment
+            print(f"Replaying {len(operations)} operations from previous trajectory...")
+            for i, op in enumerate(operations):
                 try:
-                    # Execute command via environment.exec()
-                    # Wrap in bash -lc to ensure proper shell environment
-                    await environment.exec(
-                        f"bash -lc {shlex.quote(cmd)}",
-                        timeout_sec=60,
-                    )
+                    await self._replay_operation(environment, op)
                 except Exception as e:
-                    # Continue even if a command fails
-                    print(f"Replay command {i+1} failed: {e}")
+                    # Continue even if an operation fails
+                    print(f"Replay operation {i+1} ({op['tool']}) failed: {e}")
                     continue
             
-            print(f"Finished replaying {len(commands)} commands")
+            print(f"Finished replaying {len(operations)} operations")
 
         # 3. Create recovery instruction
         recovery_instruction = (
@@ -279,3 +315,46 @@ class ReplayLettaCode(LettaCode):
 
         # 4. Run LettaCode with recovery instruction
         await super().run(recovery_instruction, environment, context)
+
+    async def _replay_operation(self, environment: BaseEnvironment, op: dict) -> None:
+        """Replay a single operation (Bash, Write, or Edit) in the environment."""
+        tool = op["tool"]
+        args = op["args"]
+        
+        if tool == "Bash":
+            cmd = args.get("command", "")
+            if cmd:
+                await environment.exec(
+                    f"bash -lc {shlex.quote(cmd)}",
+                    timeout_sec=60,
+                )
+        
+        elif tool == "Write":
+            file_path = args.get("file_path", "")
+            content = args.get("content", "")
+            if file_path and content is not None:
+                # Create parent directories and write file
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpf:
+                    tmpf.write(content)
+                    local_path = tmpf.name
+                try:
+                    # Ensure parent directory exists
+                    parent_dir = str(Path(file_path).parent)
+                    await environment.exec(f"mkdir -p {shlex.quote(parent_dir)}", timeout_sec=30)
+                    # Upload file
+                    await environment.upload_file(local_path, file_path)
+                finally:
+                    Path(local_path).unlink(missing_ok=True)
+        
+        elif tool == "Edit":
+            file_path = args.get("file_path", "")
+            old_string = args.get("old_string", "")
+            new_string = args.get("new_string", "")
+            if file_path and old_string:
+                # Use sed for simple string replacement
+                # Escape special characters for sed
+                old_escaped = old_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
+                new_escaped = new_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
+                sed_cmd = f"sed -i 's/{old_escaped}/{new_escaped}/g' {shlex.quote(file_path)}"
+                await environment.exec(f"bash -lc {shlex.quote(sed_cmd)}", timeout_sec=30)
