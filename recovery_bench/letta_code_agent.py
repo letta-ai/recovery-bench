@@ -64,23 +64,33 @@ class LettaCode(BaseInstalledAgent):
         for key in (
             "LETTA_API_KEY",
             "LETTA_BASE_URL",
-            "LETTA_MODEL",
             "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
         ):
             if key in os.environ:
                 agent_env[key] = os.environ[key]
 
         full_instruction = instruction
         escaped_instruction = shlex.quote(full_instruction)
-        model_name = os.environ.get("LETTA_MODEL", "").strip()
-        model_flag = f"--model {shlex.quote(model_name)} --init-blocks none " if model_name else ""
-
-        if "opus" in model_name or "sonnet" in model_name:
-            model_flag += "--system anthropic "
-        elif "gpt" in model_name:
-            model_flag += "--system codex "
-        elif "gemini" in model_name:
-            model_flag += "--system gemini "
+        
+        # Use model_name from Harbor (self.model_name) or fall back to env var
+        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        
+        # Pass model via environment variable (more reliable than CLI flag)
+        if model_name:
+            agent_env["LETTA_MODEL"] = model_name
+        
+        # Build model flags for CLI
+        model_flag = ""
+        if model_name:
+            model_flag = f"--model {shlex.quote(model_name)} "
+            # Add system flag based on model provider
+            if any(x in model_name.lower() for x in ["opus", "sonnet", "haiku", "claude"]):
+                model_flag += "--system letta-claude "
+            elif any(x in model_name.lower() for x in ["gpt", "o1-", "o3-"]):
+                model_flag += "--system letta-codex "
+            elif "gemini" in model_name.lower():
+                model_flag += "--system letta-gemini "
 
         # Upload instruction to container to avoid shell-quoting issues
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpf:
