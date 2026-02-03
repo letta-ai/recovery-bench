@@ -248,7 +248,7 @@ def run_replay_agent_tb(
     run_id: str | None = None,
     dataset_name: str = "terminal-bench",
     dataset_version: str = "2.0",
-    agent_import_path: str = "recovery_bench.replay_agent:ReplayAgent",
+    agent_import_path: str = "recovery_bench.replay_terminus:ReplayAgent",
     n_concurrent: int = 1,
     additional_args: List[str] | None = None,
     cleanup_container: bool = False,

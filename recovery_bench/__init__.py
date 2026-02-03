@@ -1,6 +1,6 @@
 """Recovery-Bench: Benchmark for evaluating LLM agents' recovery capabilities."""
 
-from recovery_bench.replay_agent import (
+from recovery_bench.replay_terminus import (
     ReplayAgent,
     ReplayAgentWithoutMessages,
     ReplayAgentWithMessageSummaries,

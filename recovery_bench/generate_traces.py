@@ -80,7 +80,7 @@ def run_replay_agent_for_unsolved(
     run_id: str,
     min_episodes: int = 10,
     n_concurrent: int = 4,
-    agent_import_path: str = "recovery_bench.replay_agent:ReplayAgent",
+    agent_import_path: str = "recovery_bench.replay_terminus:ReplayAgent",
 ) -> str:
     """Run replay agent for unsolved tasks."""
     print(f"Running replay agent for unsolved tasks in {trajectory_folder}...")
@@ -171,7 +171,7 @@ def main():
     parser.add_argument(
         "--replay-agent",
         type=str,
-        default="recovery_bench.replay_agent:ReplayAgent",
+        default="recovery_bench.replay_terminus:ReplayAgent",
         help="Agent import path for replay runs (e.g., recovery_bench.replay_letta_code:ReplayLettaCode)",
     )
 
