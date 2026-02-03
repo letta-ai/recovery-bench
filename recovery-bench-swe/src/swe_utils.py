@@ -492,189 +492,18 @@ def result_exists(model: str, run_id: str):
     if result_file.exists():
         return (1, result_file)
     return (0, result_file)
-
-def run_default_agent_swe(
-    cwd: Path,
-    trajectory_folder: Path, 
-    model: str, 
-    run_id: str, 
-    max_workers: int = 4
-) -> int:
-    """
-    Core algorithm for running the default swe agent
-
-    Inputs:
-        cwd (Path) - Recovery-Bench swe root
-        trajectory_folder (Path) - path to dirty state trajectories
-        model (str) - desired LiteLLM compatible model to benchmark
-        run_id (str) - unique run identifier from user input
-        max_workers (int) - number of workers to parallelize task executions
-
-    Returns:
-        0 (int) - indicates successful evalaution
-        1 (int) - indicates unsuccessful evaluation
-    """
-    result_file = get_result_file(get_results_dir(), model, run_id)
-    if result_file.exists():
-        print(f"Please input a unique run_id. Result file exists: {result_file}")
-        return 1
-    def _run_instance_from_commands(
-            p: Path,
-            *,
-            lock: Lock,
-            cwd: Path,
-            model: str,
-            run_id: str,
-        ):
-        docker_env, agent = None, None
-        exit_status, result, extra_info = None, None, None
-        instance_id = None
-        try:
-            commands_path = p / "commands.json"
-            if not commands_path.exists():
-                return None
-            commands = get_data(commands_path, JSON)
-            if commands == [] or not isinstance(commands, dict):
-                return None
-            instance_id = commands.get("instance")
-            if not instance_id:
-                return None
-            traj_path = p / f"{instance_id}.traj.{JSON}"
-            if not traj_path.exists():
-                return None
-            traj = get_data(traj_path, JSON)
-            if traj == 1:
-                return None
-
-            cfg = get_cfg(traj)
-            if cfg == 1:
-                print("ERROR: Couldn't parse config from trajectory")
-                return None
-            model_cfg = make_model_cfg(model)
-            if model_cfg == 1:
-                print("ERROR: Please enter a supported LiteLLM model name")
-                return None
-            cfg["model"] = model_cfg
-            agent_model = get_model(model, model_cfg)
-
-            env = cfg["environment"]
-            docker_env = DockerEnvironment(**env)
-
-            _agent_cfg = get_agent_config(cfg)
-            agent = DefaultAgent(
-                model=agent_model,
-                env=docker_env,
-                **_agent_cfg)
-
-            p_task = p / f"task.{TXT}"
-            task = get_data(p_task, TXT)
-            exit_status, result = agent.run(task)
-
-            print("\n\n\n\n\n")
-            print("Default Agent Returned Patch:")
-            print(result)
-
-            with lock:
-                written = write_predictions(cwd, instance_id, model, result, run_id)
-            if written:
-                print(f"ERROR: Couldn't write predictions for instance {instance_id}")
-                print("\n\n\n")
-                return None
-            return instance_id
-        except Exception as e:
-            exit_status, result = type(e).__name__, str(e)
-            extra_info = {"traceback": traceback.format_exc()}
-            print(f"ERROR processing instance: {e}")
-            return None
-        finally:
-            if instance_id is not None:
-                traj_path = agent_runs_dir(cwd, model, run_id, True)
-                extra_info = {"traceback": traceback.format_exc()}
-                if not traj_path.exists():
-                    traj_path.mkdir(parents=True, exist_ok=True)
-
-                traj_file = traj_path / f"{instance_id}.traj.json"
-                save_traj(agent=agent, path=traj_file, exit_status=exit_status, result=result, extra_info=extra_info)
-            if docker_env is not None:
-                try:
-                    docker_env.cleanup()
-                except Exception as e:
-                    print(f"Warning: Cleanup failed: {e}")
     
-    root = Path(trajectory_folder)
-    if not root.exists():
-        print(f"ERROR: Trajectory Path {trajectory_folder} does not exist")
-        return 1
-    
-    pred_dir = predictions_dir(cwd)
-    if not pred_dir.exists():
-        pred_dir.mkdir(parents=True, exist_ok=True)
-    
-    predictions = pred_dir / f"{run_id}.{JSONL}"
-    if predictions.exists():
-        os.remove(predictions)
-
-    max_workers = max(1, max_workers)
-    prediction_lock = Lock()
-    instances = []
-    paths = [p for p in root.iterdir() if p.is_dir()]
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                _run_instance_from_commands,
-                p,
-                lock=prediction_lock,
-                cwd=cwd,
-                model=model,
-                run_id=run_id,
-            )
-            for p in paths
-        ]
-        for future in as_completed(futures):
-            inst = future.result()
-            if inst:
-                instances.append(inst)
-
-    if not instances:
-        print("WARNING: No instances completed successfully; skipping evaluation.")
-        return 1
-    
-    #organize trajectories
-    traj_path = agent_runs_dir(cwd, model, run_id, True)
-    reorganize_trajectories(traj_path)
-
-    predictions = str(predictions)
-    result = run_swe_bench(
-        dataset_name = DATASET,
-        split = "test",
-        instance_ids=instances,
-        predictions_path = predictions,
-        max_workers = max_workers,
-        force_rebuild = False,
-        cache_level = "env",
-        clean = True,
-        open_file_limit = 4096,
-        run_id = run_id,
-        timeout = 1800,
-        namespace = "swebench",
-        rewrite_reports = False,
-        modal = False,
-        instance_image_tag= "latest",
-        env_image_tag = "latest",
-    ) 
-    move_result(model, run_id)
-    return result
-    
-def run_replay_agent_swe(
+def run_swe_agent(
     cwd: Path,
     trajectory_folder: Path, 
     model: str, 
     run_id: str, 
     recovery_mode: str = "full_history",
-    max_workers: int = 4
+    max_workers: int = 4,
+    default_agent: bool = False,
 ) -> int:
     """
-    Core algorithm for running the recovery/replay swe agent
+    Core algorithm for running the swe agent
 
     Inputs:
         cwd (Path) - Recovery-Bench swe root
@@ -719,7 +548,6 @@ def run_replay_agent_swe(
             traj = get_data(traj_path, JSON)
             if traj == 1:
                 return None
-
             cfg = get_cfg(traj)
             if cfg == 1:
                 print("ERROR: Couldn't parse config from trajectory")
@@ -734,34 +562,48 @@ def run_replay_agent_swe(
             env = cfg["environment"]
             docker_env = DockerEnvironment(**env)
 
-            msgs = get_message_history(traj, recovery_mode)
-            summary = create_summary(msgs, recovery_mode)
-            inject_recovery(cfg, recovery_mode, summary)
+            #inject recovery context into agent if we're not using the default agent
+            if not default_agent:
+                msgs = get_message_history(traj, recovery_mode)
+                summary = create_summary(msgs, recovery_mode)
+                inject_recovery(cfg, recovery_mode, summary)
 
             _agent_cfg = get_agent_config(cfg)
-            agent = RecoverySWEAgent(
-                model=agent_model,
-                env=docker_env,
-                messages=msgs,
-                **_agent_cfg)
+            agent = None
+            if default_agent:
+                agent = DefaultAgent(
+                    model=agent_model,
+                    env=docker_env,
+                    **_agent_cfg)
+            else:
+                agent = RecoverySWEAgent(
+                    model=agent_model,
+                    env=docker_env,
+                    messages=msgs,
+                    **_agent_cfg)
 
             commands_lst = commands.get("commands", [])
             if not commands_lst:
                 return None
-            i = 0
-            for command in commands_lst:
-                print(f"Restoring State of {instance_id} with command: {command}, {i} \n\n")
-                agent.env.execute(command)
-                i += 1
+            
+            if not default_agent:
+                for command in commands_lst:
+                    print(f"Restoring State of {instance_id} with command: {command}\n\n")
+                    agent.env.execute(command)
 
             p_task = p / f"task.{TXT}"
             task = get_data(p_task, TXT)
 
             exit_status, result = agent.run(task)
 
-            print("\n\n\n\n\n")
-            print("Recovery Agent Returned Patch:")
-            print(result)
+            if not default_agent:
+                print("\n\n\n\n\n")
+                print("Recovery Agent Returned Patch:")
+                print(result)
+            else:
+                print("\n\n\n\n\n")
+                print("Default Agent Returned Patch:")
+                print(result)
 
             with lock:
                 written = write_predictions(cwd, instance_id, model, result, run_id)

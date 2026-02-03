@@ -1,13 +1,13 @@
 """
-Run replay/recovery agent.
+Run replay/recovery agent or default agent.
 
-This script runs the replay agent on collected trajectories for swebench.
+This script runs the desired swe agent on collected trajectories for swebench.
 """
 
 import argparse
 import sys
 from pathlib import Path
-from .swe_utils import (run_replay_agent_swe, run_default_agent_swe)
+from .swe_utils import run_swe_agent
 
 def main():
     parser = argparse.ArgumentParser(
@@ -67,8 +67,8 @@ def main():
         print(f"Error: Mini-SWE-Agent trajectory folder {args.trajectory_folder} does not exist")
         return 1
     
-    #Make CWD recovery-swe-agent
-    cwd = Path(__file__).parent.parent
+    #Make CWD recovery-bench-swe
+    swe_root = Path(__file__).parent.parent
     
     #Collect args for run_replay_agent_swe
     model = args.model_name
@@ -76,9 +76,13 @@ def main():
     run_id = args.run_id
     max_workers = args.max_workers
     default_agent = args.default_agent
-    if default_agent:
-        return run_default_agent_swe(cwd, trajectory_folder, model, run_id, max_workers)
-    return run_replay_agent_swe(cwd, trajectory_folder, model, run_id, recovery_mode, max_workers)
+    return run_swe_agent(cwd=swe_root, 
+                        trajectory_folder=trajectory_folder, 
+                        model=model, 
+                        run_id=run_id, 
+                        recovery_mode=recovery_mode, 
+                        max_workers=max_workers,
+                        default_agent=default_agent)
     
 if __name__ == "__main__":
     sys.exit(main())

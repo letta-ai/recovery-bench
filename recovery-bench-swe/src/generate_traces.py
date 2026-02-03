@@ -502,6 +502,10 @@ def main():
     subset = args.subset
     workers = args.workers
     run_id = args.run_id
+
+    if (get_result_file(get_results_dir(), model, run_id).exists()):
+        print(f"Please input unique run_id ({run_id}) for model ({model})\n")
+        return 1
     
     if args.clean:
         return clean_root(test_data, False)
