@@ -78,16 +78,13 @@ def run_recovery_for_unsolved(
     traces_folder: str,
     model: str,
     job_name: str,
-    min_episodes: int = 10,
     n_concurrent: int = 4,
     agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
 ) -> str:
     """Run recovery agent for unsolved tasks."""
     print(f"Running recovery for unsolved tasks in {traces_folder}...")
 
-    unsolved_task_ids = get_unsolved_tasks(
-        traces_folder, min_episodes_desired=min_episodes
-    )
+    unsolved_task_ids = get_unsolved_tasks(traces_folder)
 
     if not unsolved_task_ids:
         print("No unsolved tasks found, skipping recovery.")
@@ -119,12 +116,6 @@ def main():
         default=3,
         help="Maximum number of recovery iterations",
     )
-    parser.add_argument(
-        "--min-episodes",
-        type=int,
-        default=10,
-        help="Minimum episodes for filtering and collection",
-    )  # If you just want to run initial traces, set this to True
     parser.add_argument(
         "--run-initial",
         action="store_true",
@@ -219,7 +210,7 @@ def main():
 
         # Get unsolved tasks from current directory
         unsolved_task_ids = get_unsolved_tasks(
-            current_traces_dir, min_episodes_desired=args.min_episodes
+            current_traces_dir
         )
 
         if not unsolved_task_ids:
@@ -238,7 +229,6 @@ def main():
             traces_folder=current_traces_dir,
             model=recovery_model,
             job_name=recovery_job_name,
-            min_episodes=args.min_episodes,
             n_concurrent=args.n_concurrent,
             agent=args.recovery_agent,
         )

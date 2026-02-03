@@ -41,13 +41,8 @@ def cleanup_docker():
         print(f"Error cleaning up Docker system: {e}")
 
 
-def get_unsolved_tasks(
-    logs_dir: str, min_episodes_desired: int = None, print_output: bool = False
-) -> List[str]:
-    """Get list of unsolved task IDs from a logs directory.
-    
-    Supports both ATIF (terminus-2) and LettaCode formats.
-    """
+def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
+    """Get list of unsolved task IDs from a logs directory."""
     logs_dir = Path(logs_dir)
     unsolved_ids = []
 
@@ -56,7 +51,6 @@ def get_unsolved_tasks(
         if not task_dir.is_dir():
             continue
 
-        # Look for result.json (ATIF format)
         results_file = task_dir / "result.json"
         if not results_file.exists():
             continue
@@ -67,7 +61,6 @@ def get_unsolved_tasks(
         except (FileNotFoundError, json.JSONDecodeError):
             continue
 
-        # Check if resolved - ATIF uses verifier_result.rewards.reward
         # reward > 0 means resolved
         verifier_result = results.get("verifier_result", {})
         rewards = verifier_result.get("rewards", {})
@@ -76,64 +69,7 @@ def get_unsolved_tasks(
             if print_output:
                 print(f"Skipping {task_id}: resolved (reward={reward})")
             continue
-
-        # Count episodes from agent_result metadata or trajectory
-        episode_count = results.get("agent_result", {}).get("metadata", {}).get("n_episodes", 0)
         
-        # Fallback: count from trajectory.json (ATIF format)
-        if episode_count == 0:
-            trajectory_file = task_dir / "agent" / "trajectory.json"
-            if not trajectory_file.exists():
-                trajectory_file = task_dir / "trajectory.json"
-            if trajectory_file.exists():
-                try:
-                    with open(trajectory_file, "r") as f:
-                        trajectory = json.load(f)
-                    steps = trajectory.get("steps", trajectory)
-                    episode_count = sum(
-                        1 for step in steps 
-                        if step.get("source") == "agent" or step.get("role") == "assistant"
-                    )
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
-
-        # Fallback: count from LettaCode events JSONL
-        if episode_count == 0:
-            agent_dir = task_dir / "agent"
-            if agent_dir.exists():
-                for f in agent_dir.iterdir():
-                    if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                        try:
-                            tool_call_ids = set()
-                            with open(f, "r") as events_file:
-                                for line in events_file:
-                                    if line.strip().startswith("{"):
-                                        try:
-                                            event = json.loads(line.strip())
-                                            tool_call = event.get("tool_call", {})
-                                            if tool_call.get("tool_call_id"):
-                                                tool_call_ids.add(tool_call["tool_call_id"])
-                                        except json.JSONDecodeError:
-                                            pass
-                            episode_count = len(tool_call_ids)
-                        except Exception:
-                            pass
-                        break
-
-        if episode_count == 0:
-            if print_output:
-                print(f"Skipping {task_id}: no episodes found")
-            continue
-
-        if (
-            min_episodes_desired is not None
-            and episode_count < min_episodes_desired
-        ):
-            if print_output:
-                print(f"Skipping {task_id}: {episode_count} episodes < {min_episodes_desired}")
-            continue
-        
-        # Extract task name from results
         task_name = results.get("task_name", task_id)
         unsolved_ids.append(task_name)
 
