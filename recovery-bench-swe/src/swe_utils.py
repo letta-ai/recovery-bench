@@ -619,7 +619,7 @@ def run_swe_agent(
             return None
         finally:
             if instance_id is not None:
-                traj_path = agent_runs_dir(cwd, model, run_id, False)
+                traj_path = agent_runs_dir(cwd, model, run_id, default_agent)
                 extra_info = {"traceback": traceback.format_exc()}
                 if not traj_path.exists():
                     traj_path.mkdir(parents=True, exist_ok=True)
@@ -672,7 +672,7 @@ def run_swe_agent(
         return 1
     
     #organize trajectories
-    traj_path = agent_runs_dir(cwd, model, run_id, False)
+    traj_path = agent_runs_dir(cwd, model, run_id, default_agent)
     reorganize_trajectories(traj_path)
 
     predictions = str(predictions)
