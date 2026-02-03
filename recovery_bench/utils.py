@@ -62,8 +62,8 @@ def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
             continue
 
         # reward > 0 means resolved
-        verifier_result = results.get("verifier_result", {})
-        rewards = verifier_result.get("rewards", {})
+        verifier_result = results.get("verifier_result") or {}
+        rewards = verifier_result.get("rewards") or {}
         reward = rewards.get("reward", 0.0)
         if reward > 0:
             if print_output:
