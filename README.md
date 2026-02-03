@@ -84,19 +84,19 @@ python3 -m recovery_bench.run_replay_agent \
 
 Three replay agent variants are available:
 
-1. **ReplayAgent** (default): Uses full message history from failed attempts
+1. **ReplayTerminus** (default): Uses full message history from failed attempts
    ```bash
-   --agent-import-path recovery_bench.replay_terminus:ReplayAgent
+   --agent-import-path recovery_bench.replay_terminus:ReplayTerminus
    ```
 
-2. **ReplayAgentWithoutMessages**: Only restores environment state, no message history
+2. **ReplayTerminusWithoutMessages**: Only restores environment state, no message history
    ```bash
-   --agent-import-path recovery_bench.replay_terminus:ReplayAgentWithoutMessages
+   --agent-import-path recovery_bench.replay_terminus:ReplayTerminusWithoutMessages
    ```
 
-3. **ReplayAgentWithMessageSummaries**: Uses summarized message history
+3. **ReplayTerminusWithMessageSummaries**: Uses summarized message history
    ```bash
-   --agent-import-path recovery_bench.replay_terminus:ReplayAgentWithMessageSummaries
+   --agent-import-path recovery_bench.replay_terminus:ReplayTerminusWithMessageSummaries
    ```
 
 ## How It Works

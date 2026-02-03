@@ -39,7 +39,7 @@ class Command:
         self.timeout_sec = timeout_sec
 
 
-class ReplayAgent(BaseAgent):
+class ReplayTerminus(BaseAgent):
     """
     Replay agent that recovers from failed trajectories.
     
@@ -82,7 +82,7 @@ Set is_task_complete to true when you believe the task is finished.
 
     @staticmethod
     def name() -> str:
-        return "replay-agent"
+        return "replay-terminus"
 
     def version(self) -> str | None:
         return "2.0.0"
@@ -415,7 +415,7 @@ Set is_task_complete to true when you believe the task is finished.
             self._add_trajectory_step("user", observation)
 
 
-class ReplayAgentWithoutMessages(ReplayAgent):
+class ReplayTerminusWithoutMessages(ReplayTerminus):
     """
     Replay agent that only restores environment state.
     
@@ -430,10 +430,10 @@ class ReplayAgentWithoutMessages(ReplayAgent):
 
     @staticmethod
     def name() -> str:
-        return "replay-agent-without-messages"
+        return "replay-terminus-without-messages"
 
 
-class ReplayAgentWithMessageSummaries(ReplayAgent):
+class ReplayTerminusWithMessageSummaries(ReplayTerminus):
     """
     Replay agent that uses summarized message history.
     
@@ -448,7 +448,7 @@ class ReplayAgentWithMessageSummaries(ReplayAgent):
 
     @staticmethod
     def name() -> str:
-        return "replay-agent-with-summaries"
+        return "replay-terminus-with-summaries"
 
     def _add_messages(self, messages: list[dict]) -> None:
         """Create a summary of messages instead of using full history."""
