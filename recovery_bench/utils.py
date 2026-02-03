@@ -46,8 +46,7 @@ def get_unsolved_tasks(
 ) -> List[str]:
     """Get list of unsolved task IDs from a logs directory.
     
-    Only supports ATIF format (terminus-2 style trajectory.json).
-    For LettaCode, use the separate letta-specific utilities.
+    Supports both ATIF (terminus-2) and LettaCode formats.
     """
     logs_dir = Path(logs_dir)
     unsolved_ids = []
@@ -97,6 +96,29 @@ def get_unsolved_tasks(
                     )
                 except (json.JSONDecodeError, FileNotFoundError):
                     pass
+
+        # Fallback: count from LettaCode events JSONL
+        if episode_count == 0:
+            agent_dir = task_dir / "agent"
+            if agent_dir.exists():
+                for f in agent_dir.iterdir():
+                    if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
+                        try:
+                            tool_call_ids = set()
+                            with open(f, "r") as events_file:
+                                for line in events_file:
+                                    if line.strip().startswith("{"):
+                                        try:
+                                            event = json.loads(line.strip())
+                                            tool_call = event.get("tool_call", {})
+                                            if tool_call.get("tool_call_id"):
+                                                tool_call_ids.add(tool_call["tool_call_id"])
+                                        except json.JSONDecodeError:
+                                            pass
+                            episode_count = len(tool_call_ids)
+                        except Exception:
+                            pass
+                        break
 
         if episode_count == 0:
             if print_output:
