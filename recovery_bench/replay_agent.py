@@ -27,11 +27,8 @@ import re
 # LiteLLM for LLM calls
 import litellm
 
-
-def create_task_hash(task_description: str) -> str:
-    """Create 8-character hash from task description."""
-    import hashlib
-    return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
+# Import from utils
+from recovery_bench.utils import create_task_hash
 
 
 class Command:

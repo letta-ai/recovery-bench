@@ -7,20 +7,15 @@ This agent extends LettaCode to:
 3. Run LettaCode with a recovery instruction
 """
 
-import hashlib
 import json
 import os
 import shlex
 from pathlib import Path
 
 from recovery_bench.letta_code_agent import LettaCode
+from recovery_bench.utils import create_task_hash
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
-
-
-def create_task_hash(task_description: str) -> str:
-    """Create 8-character hash from task description."""
-    return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
 
 
 class ReplayLettaCode(LettaCode):
