@@ -29,7 +29,7 @@ from .utils import (
     get_unsolved_tasks,
     reorganize_directories,
     run_command,
-    run_replay_agent_tb,
+    run_replay,
 )
 
 
@@ -74,37 +74,37 @@ def generate_initial_traces(
     return f"jobs/{run_id}"
 
 
-def run_replay_agent_for_unsolved(
-    trajectory_folder: str,
-    model_name: str,
-    run_id: str,
+def run_replay_for_unsolved(
+    traces_folder: str,
+    model: str,
+    job_name: str,
     min_episodes: int = 10,
     n_concurrent: int = 4,
-    agent_import_path: str = "recovery_bench.replay_terminus:ReplayTerminus",
+    agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
 ) -> str:
     """Run replay agent for unsolved tasks."""
-    print(f"Running replay agent for unsolved tasks in {trajectory_folder}...")
+    print(f"Running replay for unsolved tasks in {traces_folder}...")
 
     unsolved_task_ids = get_unsolved_tasks(
-        trajectory_folder, min_episodes_desired=min_episodes
+        traces_folder, min_episodes_desired=min_episodes
     )
 
     if not unsolved_task_ids:
-        print("No unsolved tasks found, skipping replay agent.")
-        return trajectory_folder
+        print("No unsolved tasks found, skipping replay.")
+        return traces_folder
 
     print(f"Found {len(unsolved_task_ids)} unsolved tasks")
 
-    run_replay_agent_tb(
-        trajectory_folder=trajectory_folder,
-        model_name=model_name,
+    run_replay(
+        traces_folder=traces_folder,
+        model=model,
         task_ids=unsolved_task_ids,
-        run_id=run_id,
-        agent_import_path=agent_import_path,
+        job_name=job_name,
+        agent=agent,
         n_concurrent=n_concurrent,
     )
 
-    return f"jobs/{run_id}"
+    return f"jobs/{job_name}"
 
 
 def main():
@@ -230,17 +230,17 @@ def main():
             f"Found {len(unsolved_task_ids)} unsolved tasks for iteration {iteration}"
         )
 
-        # Run replay agent
+        # Run replay
         replay_model = args.replay_model or args.model_name
         replay_model_short = replay_model.split("/")[-1]
-        replay_run_id = f"replay-{replay_model_short}-{timestamp}-iter{iteration}"
-        replay_traces_dir = run_replay_agent_for_unsolved(
-            current_traces_dir,
-            replay_model,
-            replay_run_id,
-            args.min_episodes,
-            args.n_concurrent,
-            args.replay_agent,
+        replay_job_name = f"replay-{replay_model_short}-{timestamp}-iter{iteration}"
+        replay_traces_dir = run_replay_for_unsolved(
+            traces_folder=current_traces_dir,
+            model=replay_model,
+            job_name=replay_job_name,
+            min_episodes=args.min_episodes,
+            n_concurrent=args.n_concurrent,
+            agent=args.replay_agent,
         )
 
         # Hash reorganize the new traces

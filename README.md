@@ -33,7 +33,7 @@ python3 -m recovery_bench.generate_traces openai/gpt-4o-mini
 
 ### 2. Run Replay/Recovery Agent
 ```bash
-python3 -m recovery_bench.run_replay_agent \
+python3 -m recovery_bench.run_replay \
     --trajectory-folder runs/gpt-4o-mini-collected-TIMESTAMP \
     --model-name anthropic/claude-sonnet-4-20250514
 ```
@@ -66,7 +66,7 @@ Key options:
 Run the replay/recovery agent on collected traces:
 
 ```bash
-python3 -m recovery_bench.run_replay_agent \
+python3 -m recovery_bench.run_replay \
     --trajectory-folder runs/collected-traces \
     --model-name anthropic/claude-sonnet-4-20250514 \
     --run-id recovery-test-1 \

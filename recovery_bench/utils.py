@@ -241,59 +241,40 @@ def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     return result
 
 
-def run_replay_agent_tb(
-    trajectory_folder: str,
-    model_name: str,
+def run_replay(
+    traces_folder: str,
+    model: str,
     task_ids: List[str],
-    run_id: str | None = None,
-    dataset_name: str = "terminal-bench",
-    dataset_version: str = "2.0",
-    agent_import_path: str = "recovery_bench.replay_terminus:ReplayTerminus",
-    n_concurrent: int = 1,
-    additional_args: List[str] | None = None,
-    cleanup_container: bool = False,
+    job_name: str | None = None,
+    agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
+    n_concurrent: int = 4,
 ):
-    """Run the replay agent for multiple task IDs using harbor run command."""
-
-    if cleanup_container:
-        cleanup_docker()
-
+    """Run replay agent on initial traces using harbor."""
     env = os.environ.copy()
-    env["TRAJECTORY_FOLDER"] = trajectory_folder
+    env["TRAJECTORY_FOLDER"] = traces_folder
 
     cmd = [
         "harbor",
         "run",
-        "--dataset",
-        f"{dataset_name}@{dataset_version}",
-        "--agent-import-path",
-        agent_import_path,
-        "--model",
-        model_name,
-        "--n-concurrent",
-        str(n_concurrent),
+        "--dataset", "terminal-bench@2.0",
+        "--agent-import-path", agent,
+        "--model", model,
+        "--n-concurrent", str(n_concurrent),
     ]
 
-    if run_id:
-        cmd.extend(["--job-name", run_id])
+    if job_name:
+        cmd.extend(["--job-name", job_name])
 
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
 
-    if additional_args:
-        cmd.extend(additional_args)
-
-    print(f"Running command: {' '.join(cmd)}")
-    print(f"Environment TRAJECTORY_FOLDER: {trajectory_folder}")
-    print(f"Task IDs: {task_ids}")
+    print(f"Running: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, env=env, check=True)
-        print(f"Command completed successfully with return code: {result.returncode}")
         return result.returncode
     except subprocess.CalledProcessError as e:
-        print(f"Command failed with return code: {e.returncode}")
         return e.returncode
     except Exception as e:
-        print(f"Error running command: {e}")
+        print(f"Error: {e}")
         return 1
