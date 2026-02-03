@@ -51,8 +51,8 @@ def main():
     parser.add_argument(
         "--agent",
         type=str,
-        default="recovery_bench.replay_terminus:ReplayTerminus",
-        help="Agent import path (default: ReplayTerminus for terminus-2 traces)",
+        default="recovery_bench.recovery_terminus:RecoveryTerminus",
+        help="Agent import path (default: RecoveryTerminus for terminus-2 traces)",
     )
     parser.add_argument(
         "--job-name",

@@ -10,13 +10,13 @@ This script automates the entire trace generation pipeline:
 Usage: python -m recovery_bench.generate_traces <model_name>
 
 Examples:
-    # Default agents (terminus-2 initial, ReplayTerminus recovery)
+    # Default agents (terminus-2 initial, RecoveryTerminus recovery)
     python -m recovery_bench.generate_traces openai/gpt-4o-mini --task-id cancel-async-tasks
 
-    # Custom agents (LettaCode initial, ReplayLettaCode recovery)
+    # Custom agents (LettaCode initial, RecoveryLettaCode recovery)
     python -m recovery_bench.generate_traces openai/gpt-4o-mini \\
         --initial-agent recovery_bench.letta_code_agent:LettaCode \\
-        --recovery-agent recovery_bench.replay_letta_code:ReplayLettaCode \\
+        --recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode \\
         --task-id constraints-scheduling
 """
 
@@ -79,7 +79,7 @@ def run_recovery_for_unsolved(
     model: str,
     job_name: str,
     n_concurrent: int = 4,
-    agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
+    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
 ) -> str:
     """Run recovery agent for unsolved tasks."""
     print(f"Running recovery for unsolved tasks in {traces_folder}...")
@@ -162,8 +162,8 @@ def main():
     parser.add_argument(
         "--recovery-agent",
         type=str,
-        default="recovery_bench.replay_terminus:ReplayTerminus",
-        help="Agent import path for recovery (e.g., recovery_bench.replay_letta_code:ReplayLettaCode)",
+        default="recovery_bench.recovery_terminus:RecoveryTerminus",
+        help="Agent import path for recovery (e.g., recovery_bench.recovery_letta_code:RecoveryLettaCode)",
     )
 
     args = parser.parse_args()

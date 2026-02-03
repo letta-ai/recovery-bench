@@ -1,17 +1,17 @@
 """Recovery-Bench: Benchmark for evaluating LLM agents' recovery capabilities."""
 
-from recovery_bench.replay_terminus import (
-    ReplayTerminus,
-    ReplayTerminusWithoutMessages,
-    ReplayTerminusWithMessageSummaries,
+from recovery_bench.recovery_terminus import (
+    RecoveryTerminus,
+    RecoveryTerminusWithoutMessages,
+    RecoveryTerminusWithMessageSummaries,
 )
 from recovery_bench.letta_code_agent import LettaCode
-from recovery_bench.replay_letta_code import ReplayLettaCode
+from recovery_bench.recovery_letta_code import RecoveryLettaCode
 
 __all__ = [
-    "ReplayTerminus",
-    "ReplayTerminusWithoutMessages",
-    "ReplayTerminusWithMessageSummaries",
+    "RecoveryTerminus",
+    "RecoveryTerminusWithoutMessages",
+    "RecoveryTerminusWithMessageSummaries",
     "LettaCode",
-    "ReplayLettaCode",
+    "RecoveryLettaCode",
 ]

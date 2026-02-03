@@ -234,7 +234,7 @@ def run_recovery(
     model: str,
     task_ids: List[str],
     job_name: str | None = None,
-    agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
+    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
     n_concurrent: int = 4,
 ):
     """Run recovery agent on initial traces using harbor."""

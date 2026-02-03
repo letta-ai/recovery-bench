@@ -87,13 +87,13 @@ For terminus-2 style agents that output `trajectory.json`:
 --initial-agent terminus-2
 
 # Recovery
---recovery-agent recovery_bench.replay_terminus:ReplayTerminus
+--recovery-agent recovery_bench.recovery_terminus:RecoveryTerminus
 ```
 
 Variants:
-- `ReplayTerminus`: Full message history
-- `ReplayTerminusWithoutMessages`: Environment only
-- `ReplayTerminusWithMessageSummaries`: Summarized history
+- `RecoveryTerminus`: Full message history
+- `RecoveryTerminusWithoutMessages`: Environment only
+- `RecoveryTerminusWithMessageSummaries`: Summarized history
 
 ### LettaCode (events JSONL format)
 
@@ -104,7 +104,7 @@ For LettaCode agents that output `letta_events_*.jsonl`:
 --initial-agent recovery_bench.letta_code_agent:LettaCode
 
 # Recovery
---recovery-agent recovery_bench.replay_letta_code:ReplayLettaCode
+--recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode
 ```
 
 ## Example
@@ -114,7 +114,7 @@ Test haiku failing, opus recovering:
 ```bash
 python -m recovery_bench.generate_traces anthropic/claude-haiku-4-5-20251001 \
     --initial-agent recovery_bench.letta_code_agent:LettaCode \
-    --recovery-agent recovery_bench.replay_letta_code:ReplayLettaCode \
+    --recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode \
     --recovery-model anthropic/claude-opus-4-5-20251101 \
     --task-id sqlite-db-truncate \
     --max-iterations 1

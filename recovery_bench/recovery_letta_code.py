@@ -1,5 +1,5 @@
 """
-ReplayLettaCode - LettaCode agent that replays failed trajectories before running.
+RecoveryLettaCode - LettaCode agent that replays failed trajectories before running.
 
 This agent extends LettaCode to:
 1. Find a failed trajectory matching the task (by instruction hash)
@@ -18,7 +18,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 
-class ReplayLettaCode(LettaCode):
+class RecoveryLettaCode(LettaCode):
     """
     LettaCode agent that replays a failed trajectory before running.
     
@@ -34,7 +34,7 @@ class ReplayLettaCode(LettaCode):
 
     @staticmethod
     def name() -> str:
-        return "replay-letta-code"
+        return "recovery-letta-code"
 
     def _find_trajectory_folder(self, task_hash: str) -> Path | None:
         """Find the trajectory folder based on task hash prefix.
