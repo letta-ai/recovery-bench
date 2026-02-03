@@ -4,19 +4,19 @@ Generate recovery-bench traces.
 
 This script automates the entire trace generation pipeline:
 1. Generate initial traces with an agent (default: terminus-2)
-2. Reorganize traces with hash prefixes for replay lookup
-3. Iteratively run replay agent on unsolved tasks
+2. Reorganize traces with hash prefixes for recovery lookup
+3. Iteratively run recovery agent on unsolved tasks
 
 Usage: python -m recovery_bench.generate_traces <model_name>
 
 Examples:
-    # Default agents (terminus-2 initial, ReplayAgent replay)
+    # Default agents (terminus-2 initial, ReplayTerminus recovery)
     python -m recovery_bench.generate_traces openai/gpt-4o-mini --task-id cancel-async-tasks
 
-    # Custom agents (LettaCode initial, ReplayLettaCode replay)
+    # Custom agents (LettaCode initial, ReplayLettaCode recovery)
     python -m recovery_bench.generate_traces openai/gpt-4o-mini \\
         --initial-agent recovery_bench.letta_code_agent:LettaCode \\
-        --replay-agent recovery_bench.replay_letta_code:ReplayLettaCode \\
+        --recovery-agent recovery_bench.replay_letta_code:ReplayLettaCode \\
         --task-id constraints-scheduling
 """
 
@@ -29,7 +29,7 @@ from .utils import (
     get_unsolved_tasks,
     reorganize_directories,
     run_command,
-    run_replay,
+    run_recovery,
 )
 
 
@@ -74,7 +74,7 @@ def generate_initial_traces(
     return f"jobs/{run_id}"
 
 
-def run_replay_for_unsolved(
+def run_recovery_for_unsolved(
     traces_folder: str,
     model: str,
     job_name: str,
@@ -82,20 +82,20 @@ def run_replay_for_unsolved(
     n_concurrent: int = 4,
     agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
 ) -> str:
-    """Run replay agent for unsolved tasks."""
-    print(f"Running replay for unsolved tasks in {traces_folder}...")
+    """Run recovery agent for unsolved tasks."""
+    print(f"Running recovery for unsolved tasks in {traces_folder}...")
 
     unsolved_task_ids = get_unsolved_tasks(
         traces_folder, min_episodes_desired=min_episodes
     )
 
     if not unsolved_task_ids:
-        print("No unsolved tasks found, skipping replay.")
+        print("No unsolved tasks found, skipping recovery.")
         return traces_folder
 
     print(f"Found {len(unsolved_task_ids)} unsolved tasks")
 
-    run_replay(
+    run_recovery(
         traces_folder=traces_folder,
         model=model,
         task_ids=unsolved_task_ids,
@@ -117,7 +117,7 @@ def main():
         "--max-iterations",
         type=int,
         default=3,
-        help="Maximum number of replay iterations",
+        help="Maximum number of recovery iterations",
     )
     parser.add_argument(
         "--min-episodes",
@@ -157,10 +157,10 @@ def main():
         help="Specific task ID(s) to run (can be specified multiple times)",
     )
     parser.add_argument(
-        "--replay-model",
+        "--recovery-model",
         type=str,
         default=None,
-        help="Model to use for replay agent (defaults to same as initial model)",
+        help="Model to use for recovery (defaults to same as initial model)",
     )
     parser.add_argument(
         "--initial-agent",
@@ -169,10 +169,10 @@ def main():
         help="Agent import path for initial runs (e.g., recovery_bench.letta_code_agent:LettaCode). Defaults to terminus-2.",
     )
     parser.add_argument(
-        "--replay-agent",
+        "--recovery-agent",
         type=str,
         default="recovery_bench.replay_terminus:ReplayTerminus",
-        help="Agent import path for replay runs (e.g., recovery_bench.replay_letta_code:ReplayLettaCode)",
+        help="Agent import path for recovery (e.g., recovery_bench.replay_letta_code:ReplayLettaCode)",
     )
 
     args = parser.parse_args()
@@ -212,7 +212,7 @@ def main():
     # Keep track of all trace directories
     all_trace_dirs = [initial_traces_dir]
 
-    # Step 3: Iteratively run replay agent on unsolved tasks
+    # Step 3: Iteratively run recovery agent on unsolved tasks
     current_traces_dir = initial_traces_dir
     for iteration in range(1, args.max_iterations + 1):
         print(f"\n--- Starting iteration {iteration} ---")
@@ -230,28 +230,28 @@ def main():
             f"Found {len(unsolved_task_ids)} unsolved tasks for iteration {iteration}"
         )
 
-        # Run replay
-        replay_model = args.replay_model or args.model_name
-        replay_model_short = replay_model.split("/")[-1]
-        replay_job_name = f"replay-{replay_model_short}-{timestamp}-iter{iteration}"
-        replay_traces_dir = run_replay_for_unsolved(
+        # Run recovery
+        recovery_model = args.recovery_model or args.model_name
+        recovery_model_short = recovery_model.split("/")[-1]
+        recovery_job_name = f"recovery-{recovery_model_short}-{timestamp}-iter{iteration}"
+        recovery_traces_dir = run_recovery_for_unsolved(
             traces_folder=current_traces_dir,
-            model=replay_model,
-            job_name=replay_job_name,
+            model=recovery_model,
+            job_name=recovery_job_name,
             min_episodes=args.min_episodes,
             n_concurrent=args.n_concurrent,
-            agent=args.replay_agent,
+            agent=args.recovery_agent,
         )
 
         # Hash reorganize the new traces
-        print(f"Reorganizing traces in {replay_traces_dir}...")
-        reorganize_directories(replay_traces_dir)
+        print(f"Reorganizing traces in {recovery_traces_dir}...")
+        reorganize_directories(recovery_traces_dir)
 
         # Add to list of all trace directories
-        all_trace_dirs.append(replay_traces_dir)
+        all_trace_dirs.append(recovery_traces_dir)
 
         # Update current directory for next iteration
-        current_traces_dir = replay_traces_dir
+        current_traces_dir = recovery_traces_dir
 
     print(f"\n--- Pipeline completed successfully! ---")
     print(f"Initial traces: {initial_traces_dir}")

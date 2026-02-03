@@ -241,7 +241,7 @@ def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     return result
 
 
-def run_replay(
+def run_recovery(
     traces_folder: str,
     model: str,
     task_ids: List[str],
@@ -249,7 +249,7 @@ def run_replay(
     agent: str = "recovery_bench.replay_terminus:ReplayTerminus",
     n_concurrent: int = 4,
 ):
-    """Run replay agent on initial traces using harbor."""
+    """Run recovery agent on initial traces using harbor."""
     env = os.environ.copy()
     env["TRAJECTORY_FOLDER"] = traces_folder
 

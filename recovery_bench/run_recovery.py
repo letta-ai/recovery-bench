@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Run replay agent on existing initial traces.
+Run recovery agent on existing initial traces.
 
 Use this to evaluate different models' recovery capabilities on the same
 set of failed initial traces.
 
 Usage:
-    python -m recovery_bench.run_replay --traces jobs/initial-xxx --model anthropic/claude-opus-4-5-20251101
+    python -m recovery_bench.run_recovery --traces jobs/initial-xxx --model anthropic/claude-opus-4-5-20251101
 
 Examples:
-    # Replay with opus on haiku's failed traces
-    python -m recovery_bench.run_replay \
+    # Recover with opus on haiku's failed traces
+    python -m recovery_bench.run_recovery \
         --traces jobs/initial-claude-haiku-4-5-20251001-20260202 \
         --model anthropic/claude-opus-4-5-20251101
 
-    # Use LettaCode replay agent instead of terminus
-    python -m recovery_bench.run_replay \
+    # Use LettaCode recovery agent instead of terminus
+    python -m recovery_bench.run_recovery \
         --traces jobs/initial-xxx \
         --model anthropic/claude-opus-4-5-20251101 \
         --agent recovery_bench.replay_letta_code:ReplayLettaCode
@@ -28,13 +28,13 @@ from pathlib import Path
 from .utils import (
     get_unsolved_tasks,
     reorganize_directories,
-    run_replay,
+    run_recovery,
 )
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run replay agent on existing initial traces"
+        description="Run recovery agent on existing initial traces"
     )
     parser.add_argument(
         "--traces",
@@ -93,7 +93,7 @@ def main():
             print("No unsolved tasks found in traces folder")
             return 0
 
-    print(f"Replaying {len(task_ids)} task(s) with {args.model}")
+    print(f"Running recovery on {len(task_ids)} task(s) with {args.model}")
 
     # Generate job name if not specified
     if args.job_name:
@@ -101,9 +101,9 @@ def main():
     else:
         model_short = args.model.split("/")[-1]
         traces_short = traces_path.name
-        job_name = f"replay-{model_short}-on-{traces_short}"
+        job_name = f"recovery-{model_short}-on-{traces_short}"
 
-    return run_replay(
+    return run_recovery(
         traces_folder=args.traces,
         model=args.model,
         task_ids=task_ids,
