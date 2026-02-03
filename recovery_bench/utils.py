@@ -44,7 +44,11 @@ def cleanup_docker():
 def get_unsolved_tasks(
     logs_dir: str, min_episodes_desired: int = None, print_output: bool = False
 ) -> List[str]:
-    """Get list of unsolved task IDs from a logs directory (ATIF format)."""
+    """Get list of unsolved task IDs from a logs directory.
+    
+    Only supports ATIF format (terminus-2 style trajectory.json).
+    For LettaCode, use the separate letta-specific utilities.
+    """
     logs_dir = Path(logs_dir)
     unsolved_ids = []
 
@@ -94,30 +98,6 @@ def get_unsolved_tasks(
                 except (json.JSONDecodeError, FileNotFoundError):
                     pass
 
-        # Fallback: count from LettaCode events JSONL
-        if episode_count == 0:
-            agent_dir = task_dir / "agent"
-            if agent_dir.exists():
-                for f in agent_dir.iterdir():
-                    if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                        # Count unique tool calls as episodes
-                        try:
-                            tool_call_ids = set()
-                            with open(f, "r") as events_file:
-                                for line in events_file:
-                                    if line.strip().startswith("{"):
-                                        try:
-                                            event = json.loads(line.strip())
-                                            tool_call = event.get("tool_call", {})
-                                            if tool_call.get("tool_call_id"):
-                                                tool_call_ids.add(tool_call["tool_call_id"])
-                                        except json.JSONDecodeError:
-                                            pass
-                            episode_count = len(tool_call_ids)
-                        except Exception:
-                            pass
-                        break
-
         if episode_count == 0:
             if print_output:
                 print(f"Skipping {task_id}: no episodes found")
@@ -153,20 +133,8 @@ def is_hash_prefixed_directory(task_name: str) -> bool:
 
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
-    """Extract instruction from trajectory.json (ATIF format) or LettaCode events.
-    
-    Supports:
-    1. ATIF trajectory.json (terminus-2 style)
-    2. LettaCode events JSONL + run_script.sh
-    """
+    """Extract instruction from ATIF trajectory.json (terminus-2 style)."""
     agent_dir = task_dir / "agent"
-    
-    # Try LettaCode format first (run_script.sh contains the instruction)
-    run_script = agent_dir / "run_script.sh" if agent_dir.exists() else None
-    if run_script and run_script.exists():
-        instruction = _extract_instruction_from_letta_script(run_script)
-        if instruction:
-            return instruction
     
     # Try ATIF trajectory.json
     trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
@@ -176,36 +144,6 @@ def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
         return _extract_instruction_from_atif(trajectory_file)
     
     return None
-
-
-def _extract_instruction_from_letta_script(run_script: Path) -> str | None:
-    """Extract instruction from LettaCode run_script.sh.
-    
-    The instruction is passed via -p flag: letta --new ... -p 'instruction'
-    """
-    try:
-        content = run_script.read_text()
-        
-        # Find -p 'instruction' or -p "instruction"
-        import re
-        # Match -p followed by quoted string (handles escaped quotes)
-        match = re.search(r"-p\s+'((?:[^'\\]|\\.|'\"'\"')*)'\s+--permission", content)
-        if match:
-            instruction = match.group(1)
-            # Unescape shell escapes
-            instruction = instruction.replace("'\"'\"'", "'")
-            return instruction
-        
-        # Try double quotes
-        match = re.search(r'-p\s+"((?:[^"\\]|\\.)*)"\s+--permission', content)
-        if match:
-            instruction = match.group(1)
-            instruction = instruction.replace('\\"', '"').replace("\\n", "\n")
-            return instruction
-        
-        return None
-    except Exception:
-        return None
 
 
 def _extract_instruction_from_atif(trajectory_file: Path) -> str | None:
