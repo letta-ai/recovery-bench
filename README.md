@@ -1,6 +1,6 @@
 # Recovery-Bench
 
-Recovery-Bench is a benchmark for evaluating the capability of LLM agents to recover from mistakes. This repository provides tools to generate Recovery-Bench traces and run replay/recovery agents on terminal-based tasks.
+Recovery-Bench is a benchmark for evaluating the capability of LLM agents to recover from mistakes. This repository provides tools to generate Recovery-Bench traces and run recovery agents on terminal-based tasks.
 
 Built on [Harbor](https://github.com/laude-institute/harbor) and [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench).
 
@@ -8,17 +8,14 @@ Read more on our blog: [letta.com/blog/recovery-bench](https://www.letta.com/blo
 
 ## Prerequisites
 
-1. Install Harbor:
+1. Install dependencies:
 ```bash
-pip install harbor
-# or
-uv tool install harbor
+pip install -e .
 ```
 
 2. Set up your API keys:
 ```bash
 export ANTHROPIC_API_KEY="your-key"
-# or
 export OPENAI_API_KEY="your-key"
 ```
 
@@ -26,95 +23,110 @@ export OPENAI_API_KEY="your-key"
 
 ## Quick Start
 
-### 1. Generate Recovery-Bench Traces
+### 1. Generate Initial Traces + Run Recovery
 ```bash
-python3 -m recovery_bench.generate_traces openai/gpt-4o-mini
+python -m recovery_bench.generate_traces anthropic/claude-haiku-4-5-20251001 \
+    --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --task-id sqlite-db-truncate
 ```
 
-### 2. Run Replay/Recovery Agent
+### 2. Run Recovery on Existing Traces
 ```bash
-python3 -m recovery_bench.run_recovery \
-    --trajectory-folder runs/gpt-4o-mini-collected-TIMESTAMP \
-    --model-name anthropic/claude-sonnet-4-20250514
+python -m recovery_bench.run_recovery \
+    --traces jobs/initial-haiku-xxx \
+    --model anthropic/claude-opus-4-5-20251101
 ```
 
 ## Usage
 
-### Generate Traces
+### Generate Traces Pipeline
 
-Generate complete recovery-bench traces for a model:
+Run the full pipeline: initial traces → recovery:
 
 ```bash
-python3 -m recovery_bench.generate_traces openai/gpt-4o-mini \
-    --dataset-version 2.0 \
-    --min-episodes 10 \
-    --n-concurrent 4 \
-    --max-iterations 3
+python -m recovery_bench.generate_traces <initial-model> \
+    --recovery-model <recovery-model> \
+    --task-id <task-name>
 ```
 
-Key options:
-- `--task-id`: Specific task ID(s) to run (can be specified multiple times)
-- `--dataset-version`: Dataset version (default: 2.0)
-- `--min-episodes`: Minimum episodes per task (default: 10)
+Options:
+- `--task-id`: Specific task ID(s) to run (can be repeated)
+- `--recovery-model`: Model for recovery (defaults to initial model)
+- `--recovery-agent`: Recovery agent import path
+- `--initial-agent`: Initial agent import path
 - `--n-concurrent`: Number of concurrent processes (default: 4)
-- `--max-iterations`: Maximum replay iterations (default: 3)
-- `--run-initial`: Only run initial traces, skip replay iterations
+- `--max-iterations`: Maximum recovery iterations (default: 3)
+- `--run-initial`: Only run initial traces, skip recovery
 
+### Run Recovery Separately
 
-### Run Replay Agent
-
-Run the replay/recovery agent on collected traces:
+Run recovery on existing initial traces:
 
 ```bash
-python3 -m recovery_bench.run_recovery \
-    --trajectory-folder runs/collected-traces \
-    --model-name anthropic/claude-sonnet-4-20250514 \
-    --run-id recovery-test-1 \
-    --n-concurrent 4
+python -m recovery_bench.run_recovery \
+    --traces <path-to-initial-traces> \
+    --model <recovery-model>
 ```
 
-#### Options:
-- `--trajectory-folder`: Path to the trajectory folder (required)
-- `--model-name`: Model name to use (required)
-- `--run-id`: Custom run identifier
+Options:
+- `--traces`: Path to initial traces folder (required)
+- `--model`: Model for recovery (required)
+- `--agent`: Recovery agent import path
+- `--task-id`: Specific task ID(s) to recover
+- `--job-name`: Custom job name for output
 - `--n-concurrent`: Number of concurrent processes
-- `--cleanup-container`: Clean up Docker containers before running
 
-### Agent Variants
+## Agents
 
-Three replay agent variants are available:
+### Terminus-2 (ATIF format)
 
-1. **ReplayTerminus** (default): Uses full message history from failed attempts
-   ```bash
-   --agent-import-path recovery_bench.replay_terminus:ReplayTerminus
-   ```
+For terminus-2 style agents that output `trajectory.json`:
 
-2. **ReplayTerminusWithoutMessages**: Only restores environment state, no message history
-   ```bash
-   --agent-import-path recovery_bench.replay_terminus:ReplayTerminusWithoutMessages
-   ```
+```bash
+# Initial
+--initial-agent terminus-2
 
-3. **ReplayTerminusWithMessageSummaries**: Uses summarized message history
-   ```bash
-   --agent-import-path recovery_bench.replay_terminus:ReplayTerminusWithMessageSummaries
-   ```
+# Recovery
+--recovery-agent recovery_bench.replay_terminus:ReplayTerminus
+```
+
+Variants:
+- `ReplayTerminus`: Full message history
+- `ReplayTerminusWithoutMessages`: Environment only
+- `ReplayTerminusWithMessageSummaries`: Summarized history
+
+### LettaCode (events JSONL format)
+
+For LettaCode agents that output `letta_events_*.jsonl`:
+
+```bash
+# Initial
+--initial-agent recovery_bench.letta_code_agent:LettaCode
+
+# Recovery
+--recovery-agent recovery_bench.replay_letta_code:ReplayLettaCode
+```
+
+## Example
+
+Test haiku failing, opus recovering:
+
+```bash
+python -m recovery_bench.generate_traces anthropic/claude-haiku-4-5-20251001 \
+    --initial-agent recovery_bench.letta_code_agent:LettaCode \
+    --recovery-agent recovery_bench.replay_letta_code:ReplayLettaCode \
+    --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --task-id sqlite-db-truncate \
+    --max-iterations 1
+```
 
 ## How It Works
 
-Recovery-Bench evaluates agents on their ability to recover from previous failures:
-
-1. **Generate initial traces**: Run a weaker model (e.g., gpt-4o-mini) on Terminal-Bench tasks
-2. **Collect failures**: Keep trajectories where the agent failed to complete the task
-3. **Test recovery**: Run stronger models starting from the failed state
-4. **Measure recovery capability**: Compare performance in recovery vs. fresh-start scenarios
-
-Key insight: The best-performing models for recovery differ from the top performers on fresh tasks. For example, GPT-5 shows significant improvement in recovery rankings compared to fresh-state performance.
-
-## Architecture
-
-- **Harbor**: Modern evaluation framework for Terminal-Bench 2.0
-- **Terminus-2**: Reference agent implementation with tmux-based terminal interaction
-- **ATIF**: Agent Trajectory Interchange Format for standardized trajectory storage
+1. **Generate initial traces**: Run initial model on Terminal-Bench tasks
+2. **Collect failures**: Keep trajectories where the agent failed (reward=0)
+3. **Replay operations**: Re-execute failed agent's commands to corrupt environment
+4. **Test recovery**: Run recovery model starting from corrupted state
+5. **Measure**: Compare recovery success rate across models
 
 ## Citation
 
