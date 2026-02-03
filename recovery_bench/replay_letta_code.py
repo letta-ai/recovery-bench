@@ -37,7 +37,10 @@ class ReplayLettaCode(LettaCode):
         return "replay-letta-code"
 
     def _find_trajectory_folder(self, task_hash: str) -> Path | None:
-        """Find the trajectory folder based on task hash prefix."""
+        """Find the trajectory folder based on task hash prefix.
+        
+        Only looks for LettaCode events JSONL format.
+        """
         base_path = Path(self._trajectory_folder)
         
         if not base_path.exists():
@@ -53,30 +56,16 @@ class ReplayLettaCode(LettaCode):
                 if agent_dir.exists():
                     for f in agent_dir.iterdir():
                         if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                            print(f"Found trajectory for hash {task_hash}: {item}")
+                            print(f"Found LettaCode trajectory for hash {task_hash}: {item}")
                             return item
-                
-                # Check for ATIF trajectory.json
-                trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
-                if trajectory_file and trajectory_file.exists():
-                    print(f"Found trajectory for hash {task_hash}: {item}")
-                    return item
-                
-                # Fall back to direct path
-                trajectory_file = item / "trajectory.json"
-                if trajectory_file.exists():
-                    print(f"Found trajectory for hash {task_hash}: {item}")
-                    return item
 
-        print(f"No trajectory found for hash {task_hash} in {base_path}")
+        print(f"No LettaCode trajectory found for hash {task_hash} in {base_path}")
         return None
 
     def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
-        """Extract state-modifying operations from a failed trajectory.
+        """Extract state-modifying operations from a failed LettaCode trajectory.
         
-        Supports two formats:
-        1. LettaCode events JSONL (letta_events_*.jsonl)
-        2. ATIF trajectory.json (for terminus-2 style agents)
+        Only supports LettaCode events JSONL format (letta_events_*.jsonl).
         
         Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
         """
@@ -87,25 +76,14 @@ class ReplayLettaCode(LettaCode):
         if trajectory_folder is None:
             return []
 
-        # Try LettaCode events JSONL first
+        # Parse LettaCode events JSONL
         agent_dir = trajectory_folder / "agent"
         if agent_dir.exists():
             for f in agent_dir.iterdir():
                 if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                    operations = self._parse_letta_events(f)
-                    if operations:
-                        return operations
+                    return self._parse_letta_events(f)
 
-        # Fall back to ATIF trajectory.json (only extracts Bash commands)
-        trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
-        if not trajectory_file or not trajectory_file.exists():
-            trajectory_file = trajectory_folder / "trajectory.json"
-        if trajectory_file and trajectory_file.exists():
-            commands = self._parse_atif_trajectory(trajectory_file)
-            # Convert to operation format
-            return [{"tool": "Bash", "args": {"command": cmd}} for cmd in commands]
-
-        print(f"No trajectory found in {trajectory_folder}")
+        print(f"No LettaCode events found in {trajectory_folder}")
         return []
 
     def _parse_letta_events(self, events_file: Path) -> list[dict]:
@@ -257,54 +235,6 @@ class ReplayLettaCode(LettaCode):
                 return {"patch": patch}
         
         return None
-
-    def _parse_atif_trajectory(self, trajectory_file: Path) -> list[str]:
-        """Parse ATIF trajectory.json to extract commands (terminus-2 style)."""
-        print(f"Parsing ATIF trajectory from {trajectory_file}")
-        
-        try:
-            with open(trajectory_file, "r") as f:
-                trajectory = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            print(f"Error reading trajectory: {e}")
-            return []
-
-        commands = []
-        
-        # ATIF v1.5 format: steps array with tool_calls
-        steps = trajectory.get("steps", trajectory)
-        
-        for step in steps:
-            source = step.get("source", step.get("role", ""))
-            
-            if source in ("agent", "assistant"):
-                # Extract commands from tool_calls
-                tool_calls = step.get("tool_calls", [])
-                for tool_call in tool_calls:
-                    args = tool_call.get("arguments", {})
-                    keystrokes = args.get("keystrokes", "")
-                    if keystrokes and keystrokes.strip():
-                        cmd = keystrokes.rstrip("\n")
-                        if cmd:
-                            commands.append(cmd)
-                
-                # Also try parsing message content for commands (old format)
-                if not tool_calls:
-                    content = step.get("message", step.get("content", ""))
-                    try:
-                        response = json.loads(content) if isinstance(content, str) else content
-                        if isinstance(response, dict) and "commands" in response:
-                            for cmd_obj in response["commands"]:
-                                keystrokes = cmd_obj.get("keystrokes", "")
-                                if keystrokes and keystrokes.strip():
-                                    cmd = keystrokes.rstrip("\n")
-                                    if cmd:
-                                        commands.append(cmd)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-
-        print(f"Extracted {len(commands)} commands from ATIF trajectory")
-        return commands
 
     async def run(
         self,
