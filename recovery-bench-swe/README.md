@@ -27,11 +27,11 @@ pip install mini-swe-agent
 ```bash
 python -m recovery-bench-swe.src.generate_traces \
   -- dataset` SWE-bench_Verified \
-  -- num_trajs 50 \
+  -- num-trajs 50 \
   -- model openai/gpt-5-nano \
   -- subset verified \
-  -- workers 4  \
-  -- run_id 0.0.1
+  -- max-workers 4  \
+  -- run-id 0.0.1
 ```
 
 ### Options:
