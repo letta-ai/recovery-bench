@@ -3,12 +3,21 @@
 Generate recovery-bench traces.
 
 This script automates the entire trace generation pipeline:
-1. Generate initial traces with terminus-2
+1. Generate initial traces with an agent (default: terminus-2)
 2. Reorganize traces with hash prefixes for replay lookup
 3. Iteratively run replay agent on unsolved tasks
 
 Usage: python -m recovery_bench.generate_traces <model_name>
-Example: python -m recovery_bench.generate_traces openai/gpt-4o-mini --task-id cancel-async-tasks
+
+Examples:
+    # Default agents (terminus-2 initial, ReplayAgent replay)
+    python -m recovery_bench.generate_traces openai/gpt-4o-mini --task-id cancel-async-tasks
+
+    # Custom agents (LettaCode initial, ReplayLettaCode replay)
+    python -m recovery_bench.generate_traces openai/gpt-4o-mini \\
+        --initial-agent recovery_bench.letta_code_agent:LettaCode \\
+        --replay-agent recovery_bench.replay_letta_code:ReplayLettaCode \\
+        --task-id constraints-scheduling
 """
 
 import argparse
@@ -30,6 +39,7 @@ def generate_initial_traces(
     dataset_version: str = "2.0",
     n_concurrent: int = 6,
     task_ids: List[str] | None = None,
+    agent_import_path: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run."""
     print(f"Generating initial traces for {model_name}...")
@@ -39,15 +49,22 @@ def generate_initial_traces(
         "run",
         "--dataset",
         f"terminal-bench@{dataset_version}",
-        "--agent",
-        "terminus-2",
+    ]
+
+    # Use custom agent or default to terminus-2
+    if agent_import_path:
+        cmd.extend(["--agent-import-path", agent_import_path])
+    else:
+        cmd.extend(["--agent", "terminus-2"])
+
+    cmd.extend([
         "--model",
         model_name,
         "--job-name",
         run_id,
         "--n-concurrent",
         str(n_concurrent),
-    ]
+    ])
 
     if task_ids:
         for task_id in task_ids:
@@ -63,6 +80,7 @@ def run_replay_agent_for_unsolved(
     run_id: str,
     min_episodes: int = 10,
     n_concurrent: int = 4,
+    agent_import_path: str = "recovery_bench.replay_agent:ReplayAgent",
 ) -> str:
     """Run replay agent for unsolved tasks."""
     print(f"Running replay agent for unsolved tasks in {trajectory_folder}...")
@@ -82,7 +100,7 @@ def run_replay_agent_for_unsolved(
         model_name=model_name,
         task_ids=unsolved_task_ids,
         run_id=run_id,
-        agent_import_path="recovery_bench.replay_agent:ReplayAgent",
+        agent_import_path=agent_import_path,
         n_concurrent=n_concurrent,
     )
 
@@ -144,6 +162,18 @@ def main():
         default=None,
         help="Model to use for replay agent (defaults to same as initial model)",
     )
+    parser.add_argument(
+        "--initial-agent",
+        type=str,
+        default=None,
+        help="Agent import path for initial runs (e.g., recovery_bench.letta_code_agent:LettaCode). Defaults to terminus-2.",
+    )
+    parser.add_argument(
+        "--replay-agent",
+        type=str,
+        default="recovery_bench.replay_agent:ReplayAgent",
+        help="Agent import path for replay runs (e.g., recovery_bench.replay_letta_code:ReplayLettaCode)",
+    )
 
     args = parser.parse_args()
 
@@ -163,7 +193,12 @@ def main():
     else:
         initial_run_id = f"initial-{model_short}-{timestamp}"
         initial_traces_dir = generate_initial_traces(
-            args.model_name, initial_run_id, args.dataset_version, args.n_concurrent, args.task_ids
+            args.model_name,
+            initial_run_id,
+            args.dataset_version,
+            args.n_concurrent,
+            args.task_ids,
+            args.initial_agent,
         )
 
     if args.run_initial:
@@ -205,6 +240,7 @@ def main():
             replay_run_id,
             args.min_episodes,
             args.n_concurrent,
+            args.replay_agent,
         )
 
         # Hash reorganize the new traces
