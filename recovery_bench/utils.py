@@ -41,10 +41,8 @@ def cleanup_docker():
         print(f"Error cleaning up Docker system: {e}")
 
 
-def get_unsolved_tasks(
-    logs_dir: str, min_episodes_desired: int = None, print_output: bool = False
-) -> List[str]:
-    """Get list of unsolved task IDs from a logs directory (ATIF format)."""
+def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
+    """Get list of unsolved task IDs from a logs directory."""
     logs_dir = Path(logs_dir)
     unsolved_ids = []
 
@@ -53,7 +51,6 @@ def get_unsolved_tasks(
         if not task_dir.is_dir():
             continue
 
-        # Look for result.json (ATIF format)
         results_file = task_dir / "result.json"
         if not results_file.exists():
             continue
@@ -64,74 +61,15 @@ def get_unsolved_tasks(
         except (FileNotFoundError, json.JSONDecodeError):
             continue
 
-        # Check if resolved - ATIF uses verifier_result.rewards.reward
         # reward > 0 means resolved
-        verifier_result = results.get("verifier_result", {})
-        rewards = verifier_result.get("rewards", {})
+        verifier_result = results.get("verifier_result") or {}
+        rewards = verifier_result.get("rewards") or {}
         reward = rewards.get("reward", 0.0)
         if reward > 0:
             if print_output:
                 print(f"Skipping {task_id}: resolved (reward={reward})")
             continue
-
-        # Count episodes from agent_result metadata or trajectory
-        episode_count = results.get("agent_result", {}).get("metadata", {}).get("n_episodes", 0)
         
-        # Fallback: count from trajectory.json (ATIF format)
-        if episode_count == 0:
-            trajectory_file = task_dir / "agent" / "trajectory.json"
-            if not trajectory_file.exists():
-                trajectory_file = task_dir / "trajectory.json"
-            if trajectory_file.exists():
-                try:
-                    with open(trajectory_file, "r") as f:
-                        trajectory = json.load(f)
-                    steps = trajectory.get("steps", trajectory)
-                    episode_count = sum(
-                        1 for step in steps 
-                        if step.get("source") == "agent" or step.get("role") == "assistant"
-                    )
-                except (json.JSONDecodeError, FileNotFoundError):
-                    pass
-
-        # Fallback: count from LettaCode events JSONL
-        if episode_count == 0:
-            agent_dir = task_dir / "agent"
-            if agent_dir.exists():
-                for f in agent_dir.iterdir():
-                    if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                        # Count unique tool calls as episodes
-                        try:
-                            tool_call_ids = set()
-                            with open(f, "r") as events_file:
-                                for line in events_file:
-                                    if line.strip().startswith("{"):
-                                        try:
-                                            event = json.loads(line.strip())
-                                            tool_call = event.get("tool_call", {})
-                                            if tool_call.get("tool_call_id"):
-                                                tool_call_ids.add(tool_call["tool_call_id"])
-                                        except json.JSONDecodeError:
-                                            pass
-                            episode_count = len(tool_call_ids)
-                        except Exception:
-                            pass
-                        break
-
-        if episode_count == 0:
-            if print_output:
-                print(f"Skipping {task_id}: no episodes found")
-            continue
-
-        if (
-            min_episodes_desired is not None
-            and episode_count < min_episodes_desired
-        ):
-            if print_output:
-                print(f"Skipping {task_id}: {episode_count} episodes < {min_episodes_desired}")
-            continue
-        
-        # Extract task name from results
         task_name = results.get("task_name", task_id)
         unsolved_ids.append(task_name)
 
@@ -153,20 +91,21 @@ def is_hash_prefixed_directory(task_name: str) -> bool:
 
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
-    """Extract instruction from trajectory.json (ATIF format) or LettaCode events.
+    """Extract instruction from task directory.
     
     Supports:
-    1. ATIF trajectory.json (terminus-2 style)
-    2. LettaCode events JSONL + run_script.sh
+    - ATIF trajectory.json (terminus-2)
+    - LettaCode run_script.sh
     """
     agent_dir = task_dir / "agent"
     
-    # Try LettaCode format first (run_script.sh contains the instruction)
-    run_script = agent_dir / "run_script.sh" if agent_dir.exists() else None
-    if run_script and run_script.exists():
-        instruction = _extract_instruction_from_letta_script(run_script)
-        if instruction:
-            return instruction
+    # Try LettaCode run_script.sh
+    if agent_dir.exists():
+        run_script = agent_dir / "run_script.sh"
+        if run_script.exists():
+            instruction = _extract_instruction_from_letta_script(run_script)
+            if instruction:
+                return instruction
     
     # Try ATIF trajectory.json
     trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
@@ -179,33 +118,20 @@ def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
 
 
 def _extract_instruction_from_letta_script(run_script: Path) -> str | None:
-    """Extract instruction from LettaCode run_script.sh.
-    
-    The instruction is passed via -p flag: letta --new ... -p 'instruction'
-    """
+    """Extract instruction from LettaCode run_script.sh."""
+    import re
     try:
         content = run_script.read_text()
-        
-        # Find -p 'instruction' or -p "instruction"
-        import re
-        # Match -p followed by quoted string (handles escaped quotes)
-        match = re.search(r"-p\s+'((?:[^'\\]|\\.|'\"'\"')*)'\s+--permission", content)
+        # Match -p followed by quoted string
+        match = re.search(r"-p\s+'((?:[^'\\]|\\.)*)'", content)
         if match:
-            instruction = match.group(1)
-            # Unescape shell escapes
-            instruction = instruction.replace("'\"'\"'", "'")
-            return instruction
-        
-        # Try double quotes
-        match = re.search(r'-p\s+"((?:[^"\\]|\\.)*)"\s+--permission', content)
+            return match.group(1).replace("'\"'\"'", "'")
+        match = re.search(r'-p\s+"((?:[^"\\]|\\.)*)"', content)
         if match:
-            instruction = match.group(1)
-            instruction = instruction.replace('\\"', '"').replace("\\n", "\n")
-            return instruction
-        
-        return None
+            return match.group(1).replace('\\"', '"').replace("\\n", "\n")
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _extract_instruction_from_atif(trajectory_file: Path) -> str | None:
@@ -303,59 +229,40 @@ def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     return result
 
 
-def run_replay_agent_tb(
-    trajectory_folder: str,
-    model_name: str,
+def run_recovery(
+    traces_folder: str,
+    model: str,
     task_ids: List[str],
-    run_id: str | None = None,
-    dataset_name: str = "terminal-bench",
-    dataset_version: str = "2.0",
-    agent_import_path: str = "recovery_bench.replay_agent:ReplayAgent",
-    n_concurrent: int = 1,
-    additional_args: List[str] | None = None,
-    cleanup_container: bool = False,
+    job_name: str | None = None,
+    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
+    n_concurrent: int = 4,
 ):
-    """Run the replay agent for multiple task IDs using harbor run command."""
-
-    if cleanup_container:
-        cleanup_docker()
-
+    """Run recovery agent on initial traces using harbor."""
     env = os.environ.copy()
-    env["TRAJECTORY_FOLDER"] = trajectory_folder
+    env["TRAJECTORY_FOLDER"] = traces_folder
 
     cmd = [
         "harbor",
         "run",
-        "--dataset",
-        f"{dataset_name}@{dataset_version}",
-        "--agent-import-path",
-        agent_import_path,
-        "--model",
-        model_name,
-        "--n-concurrent",
-        str(n_concurrent),
+        "--dataset", "terminal-bench@2.0",
+        "--agent-import-path", agent,
+        "--model", model,
+        "--n-concurrent", str(n_concurrent),
     ]
 
-    if run_id:
-        cmd.extend(["--job-name", run_id])
+    if job_name:
+        cmd.extend(["--job-name", job_name])
 
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
 
-    if additional_args:
-        cmd.extend(additional_args)
-
-    print(f"Running command: {' '.join(cmd)}")
-    print(f"Environment TRAJECTORY_FOLDER: {trajectory_folder}")
-    print(f"Task IDs: {task_ids}")
+    print(f"Running: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, env=env, check=True)
-        print(f"Command completed successfully with return code: {result.returncode}")
         return result.returncode
     except subprocess.CalledProcessError as e:
-        print(f"Command failed with return code: {e.returncode}")
         return e.returncode
     except Exception as e:
-        print(f"Error running command: {e}")
+        print(f"Error: {e}")
         return 1

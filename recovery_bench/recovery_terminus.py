@@ -27,11 +27,8 @@ import re
 # LiteLLM for LLM calls
 import litellm
 
-
-def create_task_hash(task_description: str) -> str:
-    """Create 8-character hash from task description."""
-    import hashlib
-    return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
+# Import from utils
+from recovery_bench.utils import create_task_hash
 
 
 class Command:
@@ -42,7 +39,7 @@ class Command:
         self.timeout_sec = timeout_sec
 
 
-class ReplayAgent(BaseAgent):
+class RecoveryTerminus(BaseAgent):
     """
     Replay agent that recovers from failed trajectories.
     
@@ -85,7 +82,7 @@ Set is_task_complete to true when you believe the task is finished.
 
     @staticmethod
     def name() -> str:
-        return "replay-agent"
+        return "recovery-terminus"
 
     def version(self) -> str | None:
         return "2.0.0"
@@ -418,7 +415,7 @@ Set is_task_complete to true when you believe the task is finished.
             self._add_trajectory_step("user", observation)
 
 
-class ReplayAgentWithoutMessages(ReplayAgent):
+class RecoveryTerminusWithoutMessages(RecoveryTerminus):
     """
     Replay agent that only restores environment state.
     
@@ -433,10 +430,10 @@ class ReplayAgentWithoutMessages(ReplayAgent):
 
     @staticmethod
     def name() -> str:
-        return "replay-agent-without-messages"
+        return "recovery-terminus-without-messages"
 
 
-class ReplayAgentWithMessageSummaries(ReplayAgent):
+class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
     """
     Replay agent that uses summarized message history.
     
@@ -451,7 +448,7 @@ class ReplayAgentWithMessageSummaries(ReplayAgent):
 
     @staticmethod
     def name() -> str:
-        return "replay-agent-with-summaries"
+        return "recovery-terminus-with-summaries"
 
     def _add_messages(self, messages: list[dict]) -> None:
         """Create a summary of messages instead of using full history."""
