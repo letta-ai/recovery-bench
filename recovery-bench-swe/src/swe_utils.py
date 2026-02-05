@@ -482,8 +482,10 @@ def reorganize_trajectories(runs_dir: Path):
         new_traj_path = instance_dir / traj_file.name
         shutil.move(str(traj_file), str(new_traj_path))
         commands_path = instance_dir / "commands.json" #can write instance_id to commands.json file as well (future update)
+        
+        to_write = {"instance": instance_id, "commands": commands}
         with open(commands_path, 'w') as f:
-            json.dump(commands, f, indent=2)
+            json.dump(to_write, f, indent=2)
         print(f"Processed {instance_id}: {len(commands)} commands extracted")
 
 def result_exists(model: str, run_id: str):
@@ -492,6 +494,30 @@ def result_exists(model: str, run_id: str):
     if result_file.exists():
         return (1, result_file)
     return (0, result_file)
+
+def print_resolve_rate(model: str, run_id: str):
+    """Prints success rate after submission to SWE-Bench evaluator"""
+    try:
+        file_exists, result_file = result_exists(model, run_id)
+        if file_exists:
+            result_data = None
+            with open(result_file, "r") as f:
+                result_data = json.load(f)
+            submitted = result_data["submitted_instances"]
+            resolved = result_data["resolved_instances"]
+            resolve_rate = round(resolved / submitted, 2) * 100
+            print("\n\n")
+            print("=" * 50)
+            print(f"%Resolved: {resolve_rate}%")
+            print("=" * 50)
+            return 0
+        else:
+            print(f"ERROR: SWE-Bench evaluator failed to write to results directory {result_file}")
+            return 1
+    except Exception as e:
+        print(f"ERROR: SWE-Bench evaluator failed to write to results directory {result_file}")
+        return 1
+
     
 def run_swe_agent(
     cwd: Path,
@@ -674,7 +700,6 @@ def run_swe_agent(
     #organize trajectories
     traj_path = agent_runs_dir(cwd, model, run_id, default_agent)
     reorganize_trajectories(traj_path)
-
     predictions = str(predictions)
     result = run_swe_bench(
         dataset_name = DATASET,
@@ -695,4 +720,4 @@ def run_swe_agent(
         env_image_tag = "latest",
     )
     move_result(model, run_id)
-    return result 
+    return print_resolve_rate(model, run_id)

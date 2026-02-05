@@ -10,7 +10,6 @@ from pathlib import Path
 from swebench.harness.run_evaluation import main as run_swe_bench
 from .swe_utils import (get_runs_dir,
                         get_swe_root_dir,
-                        get_root,
                         get_result_file, 
                         get_results_dir,
                         predictions_dir, 
@@ -23,12 +22,11 @@ from .swe_utils import (get_runs_dir,
                         move_result)
 
 P_NLP = "princeton-nlp"
-DATASET = "princeton-nlp/SWE-bench_Verified"
 
 def get_dataset(swebench_data : Path):
     """
     Get's desired SWEBench dataset from user inputted SWE Bench 
-    dataset
+    dataset specification
 
     Inputs:
         swebench_data (Path) - SWEBench dataset to generate traces from
@@ -44,7 +42,7 @@ def get_dataset(swebench_data : Path):
     try:
         dataset = load_dataset(str(swebench_data))
         print(f"Sucessfully loaded dataset: {swebench_data}\n")
-        return dataset
+        return swebench_data, dataset
     except Exception as e:
         print(f"Failed to load dataset: {swebench_data}\n")
         return 1
@@ -127,7 +125,7 @@ def get_miniswe_preds():
         print(f"Error: Couldn't read predictions json file from {predictions}")
         return 1
 
-def run_preds(max_workers: int, run_id : str):
+def run_preds(max_workers: int, run_id : str, dataset_name: Path):
     """
     Runs the predictions from the weak mini swe agent checking 
     if the mini swe agent failed to apply a correcting patches.
@@ -156,7 +154,7 @@ def run_preds(max_workers: int, run_id : str):
     
     predictions = pred_dir / (run_id + ".jsonl")
     return run_swe_bench(
-                dataset_name = DATASET,
+                dataset_name = str(dataset_name),
                 split = "test",
                 instance_ids=instances,
                 predictions_path = str(predictions),
@@ -350,7 +348,8 @@ def pred_and_org(
     swe_data: dict, 
     model: str, 
     max_workers: int,
-    run_id: str
+    run_id: str,
+    dataset_name: str
 ) -> int:
     """
     A routine for making predictions off the generated trajectories, 
@@ -369,7 +368,7 @@ def pred_and_org(
     """
     
     # Run the predictions
-    result = run_preds(max_workers, run_id)
+    result = run_preds(max_workers, run_id, dataset_name)
     if result == 1:
         return 1
     
@@ -434,6 +433,19 @@ def clean_root(dataset: dict, dry_run: bool):
                 print(f"[DEL] {d}")
     print(removed)
 
+def clean_preds_file():
+    """
+    Remove the preds.json file to prevent running evaluations on old predictions.
+    """
+    swe_root = get_swe_root_dir()
+    preds_file = swe_root / "preds.json"
+    
+    if preds_file.exists():
+        print(f"Removing old predictions file: {preds_file}")
+        preds_file.unlink()
+        print("Old preds.json removed\n")
+    return 0
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate dirty states for SWE Bench instances"
@@ -448,9 +460,9 @@ def main():
     )
     
     parser.add_argument(
-        "--num_trajs",
+        "--num-trajs",
         type = int,
-        default = 50,
+        default = 1,
         help = "Number of dirty states out of swebench dataset to generate",
     )
 
@@ -469,14 +481,14 @@ def main():
     )
 
     parser.add_argument(
-        "--workers",
+        "--max-workers",
         type = int,
-        default = 4,
+        default = 1,
         help = "Number of worker threads for parallel processing",
     )
 
     parser.add_argument(
-        "--run_id",
+        "--run-id",
         type = str,
         required = True,
         help = "Unique run id to be used for trajectory generation and organization",
@@ -490,27 +502,26 @@ def main():
 
     args, unknown = parser.parse_known_args()    
     swebench_data = Path(args.dataset)
-    dataset = get_dataset(swebench_data)
+    dataset_name, dataset = get_dataset(swebench_data)
     if dataset == 1:
         return 1
 
     # Get test split from dataset
     test_data = dataset["test"]
-    
     num_trajs = args.num_trajs
     model = args.model
     subset = args.subset
-    workers = args.workers
+    workers = args.max_workers
     run_id = args.run_id
 
+    clean_preds_file()
     if (get_result_file(get_results_dir(), model, run_id).exists()):
         print(f"Please input unique run_id ({run_id}) for model ({model})\n")
         return 1
-    
     if args.clean:
         return clean_root(test_data, False)
     gen_dirty_states(num_trajs, model, subset, workers)
-    return pred_and_org(test_data, model, workers, run_id)
+    return pred_and_org(test_data, model, workers, run_id, dataset_name)
 
 
 if __name__ == "__main__":

@@ -385,7 +385,8 @@ def compare_first_tokens(default_runs: Path, recovery_runs: Path, common_submitt
         default_commands_path = default_runs / instance_id / "commands.json"
         if default_commands_path.exists():
             with open(default_commands_path) as f:
-                commands = json.load(f)
+                commands_file = json.load(f)
+                commands = commands_file["commands"]
                 for cmd in commands:
                     # Get first token (word) from each command
                     first_token = cmd.split()[0] if cmd.strip() else ""
@@ -396,7 +397,8 @@ def compare_first_tokens(default_runs: Path, recovery_runs: Path, common_submitt
         recovery_commands_path = recovery_runs / instance_id / "commands.json"
         if recovery_commands_path.exists():
             with open(recovery_commands_path) as f:
-                commands = json.load(f)
+                commands_file = json.load(f)
+                commands = commands_file["commands"]
                 for cmd in commands:
                     first_token = cmd.split()[0] if cmd.strip() else ""
                     if first_token:
