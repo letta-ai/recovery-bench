@@ -1,0 +1,12 @@
+{
+  "instance": "astropy__astropy-13236",
+  "commands": [
+    "ls -la",
+    "grep -Rn \"NdarrayMixin\" -n astropy || true",
+    "nl -ba astropy/table/table.py | sed -n '1180,1270p'",
+    "nl -ba astropy/table/table.py | sed -n '1,140p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path(\"astropy/table/table.py\")\ns = p.read_text()\nold = (\"if (not isinstance(data, Column) and not data_is_mixin\\n\"\n       \"                and isinstance(data, np.ndarray) and len(data.dtype) > 1):\\n\"\n       \"            data = data.view(NdarrayMixin)\\n\"\n       \"            data_is_mixin = True\\n\")\nnew = (\"if (not isinstance(data, Column) and not data_is_mixin\\n\"\n       \"                and isinstance(data, np.ndarray) and len(data.dtype) > 1):\\n\"\n       \"            warnings.warn(\\n\"\n       \"                \\\"Adding a structured numpy.ndarray to a Table currently views it \\\"\\n\"\n       \"                \\\"as an NdarrayMixin. In a future version (Astropy 5.2) structured \\\"\\n\"\n       \"                \\\"arrays will instead be added as Column; to retain the current \\\"\\n       \"\n       \"                \\\"view-as-mixin behavior, wrap the array in astropy.table.Column.\\\",\\n\"\n       \"                FutureWarning, stacklevel=2)\\n\"\n       \"            data = data.view(NdarrayMixin)\\n\"\n       \"            data_is_mixin = True\\n\")\nif old in s:\n    s = s.replace(old, new, 1)\n    p.write_text(s)\n    print(\"Patched astropy/table/table.py\")\nelse:\n    print(\"Pattern not found; no changes made.\")\nPY",
+    "python - <<'PY'\nimport warnings\nfrom astropy.table import Table, Column, NdarrayMixin\nimport numpy as np\nwarnings.simplefilter(\"always\", FutureWarning)\narr = np.array([(1,'a'), (2,'b')], dtype=[('x','i4'),('y','U1')])\nt = Table()\nwith warnings.catch_warnings(record=True) as w:\n    warnings.simplefilter(\"always\", FutureWarning)\n    t['s'] = arr\n    print(\"Captured warnings:\", len(w))\n    for wi in w:\n        print(f\"{wi.category.__name__}: {wi.message}\")\nprint(\"Type of t['s']:\", type(t['s']).__name__, \"Is instance of NdarrayMixin?\", isinstance(t['s'], NdarrayMixin))\nPY",
+    "pytest -q astropy/table -q"
+  ]
+}

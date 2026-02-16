@@ -1,0 +1,23 @@
+{
+  "instance": "mwaskom__seaborn-3187",
+  "commands": [
+    "ls -la",
+    "nl -ba seaborn/_core/scales.py | sed -n '1,220p'",
+    "grep -nR \"ScalarFormatter\\|legend\" -n seaborn | sed -n '1,200p'",
+    "nl -ba seaborn/relational.py | sed -n '1,260p'",
+    "nl -ba seaborn/utils.py | sed -n '1,360p'",
+    "grep -n \"def locator_to_legend_entries\" -n seaborn/utils.py",
+    "nl -ba seaborn/utils.py | sed -n '680,760p'",
+    "nl -ba seaborn/relational.py | sed -n '240,320p'",
+    "python - <<'PY'\nimport matplotlib as mpl\nfrom matplotlib.ticker import ScalarFormatter\nfmt = ScalarFormatter()\nvals = [1e6, 1.2e6, 1.4e6]\nfmt.set_locs(vals)\nformatted = [fmt(v) for v in vals]\noffset = fmt.get_offset()\nprint(\"formatted:\", formatted)\nprint(\"offset repr:\", repr(offset))\nprint(\"has get_offset:\", hasattr(fmt, \"get_offset\"))\n# Also show orderOfMagnitude and offset attribute if present\nprint(\"attributes:\", {k:getattr(fmt,k) for k in [\"orderOfMagnitude\",\"offset\",\"useOffset\",\"_useMathText\"] if hasattr(fmt,k)})\nPY",
+    "python - <<'PY'\nimport matplotlib as mpl\nfrom matplotlib.ticker import ScalarFormatter, LogFormatter\nclass dummy_axis:\n    def __init__(self, limits):\n        self._limits = limits\n    def get_view_interval(self):\n        return self._limits\n\nfor vals in ([1e6, 1.2e6, 1.4e6], [1e-6, 2e-6, 3e-6]):\n    if True:\n        locator_vals = vals\n        limits = min(locator_vals), max(locator_vals)\n        fmt = ScalarFormatter()\n        fmt.axis = dummy_axis(limits)\n        fmt.set_locs(locator_vals)\n        formatted = [fmt(x) for x in locator_vals]\n        offset = fmt.get_offset() if hasattr(fmt, \"get_offset\") else \"\"\n        print(\"vals:\", locator_vals)\n        print(\"formatted:\", formatted)\n        print(\"offset repr:\", repr(offset))\n        print(\"orderOfMagnitude:\", getattr(fmt, \"orderOfMagnitude\", None))\n        print(\"useOffset:\", getattr(fmt, \"useOffset\", None))\n        print(\"----\")\nPY",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path(\"seaborn/utils.py\")\ns = p.read_text()\nold = \"    formatter.set_locs(raw_levels)\\n    formatted_levels = [formatter(x) for x in raw_levels]\\n\"\nif old in s:\n    new = (\n        \"    formatter.set_locs(raw_levels)\\n\"\n        \"    formatted_levels = [formatter(x) for x in raw_levels]\\n\"\n        \"    # If the formatter uses an offset (e.g., ScalarFormatter), include it\\n\"\n        \"    # in the legend labels so values like 1e6 are represented correctly.\\n\"\n        \"    offset = \\\"\\\"\\n\"\n        \"    try:\\n\"\n        \"        offset = formatter.get_offset()\\n\"\n        \"    except Exception:\\n\"\n        \"        offset = \\\"\\\"\\n\"\n        \"    if offset:\\n\"\n        \"        formatted_levels = [f\\\"{fl} ({offset})\\\" for fl in formatted_levels]\\n\"\n    )\n    s = s.replace(old, new, 1)\n    p.write_text(s)\n    print(\"patched seaborn/utils.py\")\nelse:\n    print(\"pattern not found; no change\")\nPY",
+    "python - <<'PY'\nfrom seaborn.utils import locator_to_legend_entries\nimport matplotlib.ticker as mt\n\n# Test with large values around 1e6\nlocator = mt.MaxNLocator(nbins=6)\nlimits = (1e6, 1.4e6)\nlevels, formatted = locator_to_legend_entries(locator, limits, float)\nprint(\"Large range levels:\", levels)\nprint(\"Large range formatted:\", formatted)\n\n# Test with small values around 1e-6\nlocator2 = mt.MaxNLocator(nbins=6)\nlimits2 = (1e-6, 3e-6)\nlevels2, formatted2 = locator_to_legend_entries(locator2, limits2, float)\nprint(\"Small range levels:\", levels2)\nprint(\"Small range formatted:\", formatted2)\nPY",
+    "pytest -q",
+    "grep -nR \"locator_to_legend_entries\\|legend.*offset\\|legend.*ScalarFormatter\" tests || true",
+    "nl -ba tests/test_utils.py | sed -n '1,220p'",
+    "nl -ba tests/test_utils.py | sed -n '296,340p'",
+    "pytest -q tests/test_utils.py::test_locator_to_legend_entries -q",
+    "pytest -q tests/test_relational.py -q"
+  ]
+}

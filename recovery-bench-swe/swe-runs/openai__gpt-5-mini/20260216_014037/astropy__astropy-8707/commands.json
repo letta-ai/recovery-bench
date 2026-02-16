@@ -1,0 +1,17 @@
+{
+  "instance": "astropy__astropy-8707",
+  "commands": [
+    "ls -la && grep -R --line-number \"fromstring\" testbed || true",
+    "grep -R --line-number \"fromstring\" . || true",
+    "nl -ba astropy/io/fits/header.py | sed -n '1,240p' && echo \"----\" && nl -ba astropy/io/fits/header.py | sed -n '300,460p' && echo \"----\" && nl -ba astropy/io/fits/card.py | sed -n '500,620p'",
+    "nl -ba astropy/io/fits/header.py | sed -n '320,420p'",
+    "nl -ba astropy/io/fits/card.py | sed -n '1,220p'",
+    "nl -ba astropy/io/fits/util.py | sed -n '1,260p'",
+    "grep -n \"def encode_ascii\\\\|def decode_ascii\" astropy/io/fits/util.py || true",
+    "nl -ba astropy/io/fits/util.py | sed -n '256,296p'",
+    "nl -ba astropy/io/fits/card.py | grep -n \"def _pad\" -n || true",
+    "nl -ba astropy/io/fits/card.py | sed -n '1266,1296p'",
+    "python3 - <<'PY'\nfrom pathlib import Path\n# Modify card.py: add decode_ascii to util import and insert decode in fromstring\ncard_path = Path('astropy/io/fits/card.py')\ns = card_path.read_text()\n# Add decode_ascii to import line\ns = s.replace(\"from .util import _str_to_num, _is_int, translate, _words_group\",\n              \"from .util import _str_to_num, _is_int, translate, _words_group, decode_ascii\")\n# Insert decode logic into Card.fromstring after its docstring\nfn_def = \"def fromstring(cls, image):\"\ni = s.find(fn_def)\nif i != -1:\n    # find the end of the docstring (first pair of triple quotes after def)\n    first_q = s.find('\"\"\"', i)\n    second_q = s.find('\"\"\"', first_q+3)\n    insert_at = second_q + 3\n    insert_code = (\n        \"\\n        # Accept bytes input on Python 3: decode ASCII bytes to str\\n\"\n        \"        if isinstance(image, (bytes, bytearray)):\\n\"\n        \"            image = decode_ascii(image)\\n\"\n    )\n    s = s[:insert_at] + insert_code + s[insert_at:]\ncard_path.write_text(s)\n\n# Modify header.py: insert decode logic into Header.fromstring after its docstring\nheader_path = Path('astropy/io/fits/header.py')\ns = header_path.read_text()\nfn_def = \"def fromstring(cls, data, sep=''):\"\ni = s.find(fn_def)\nif i != -1:\n    first_q = s.find('\"\"\"', i)\n    second_q = s.find('\"\"\"', first_q+3)\n    insert_at = second_q + 3\n    insert_code = (\n        \"\\n        # Accept bytes input on Python 3: decode ASCII bytes to str\\n\"\n        \"        if isinstance(data, (bytes, bytearray)):\\n\"\n        \"            data = decode_ascii(data)\\n\"\n        \"        if isinstance(sep, (bytes, bytearray)):\\n\"\n        \"            sep = decode_ascii(sep)\\n\"\n    )\n    s = s[:insert_at] + insert_code + s[insert_at:]\nheader_path.write_text(s)\n\n# Quick import test: use the modified code to ensure bytes input is accepted\nimport importlib, sys\n# Ensure local package import uses current directory\nsys.path.insert(0, '')\n# Reload modules if previously loaded\nm_card = importlib.import_module('astropy.io.fits.card')\nimportlib.reload(m_card)\nm_header = importlib.import_module('astropy.io.fits.header')\nimportlib.reload(m_header)\nCard = m_card.Card\nHeader = m_header.Header\n\n# Test Card.fromstring with bytes\nc = Card.fromstring(b' ' * 80)\nprint('Card image type:', type(c.image).__name__, 'length', len(c.image))\n# Test Header.fromstring with a single END card (bytes)\nh = Header.fromstring(b'END' + b' ' * 77)\nprint('Header length:', len(h))\nPY",
+    "pytest -q astropy/io/fits/tests/test_header.py::TestHeader::test_commentary_card_created_by_fromstring -q"
+  ]
+}

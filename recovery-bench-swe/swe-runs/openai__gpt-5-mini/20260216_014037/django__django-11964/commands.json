@@ -1,0 +1,23 @@
+{
+  "instance": "django__django-11964",
+  "commands": [
+    "ls -laR",
+    "grep -R --line-number \"TextChoices\\|IntegerChoices\\|Choices\" django | sed -n '1,200p'",
+    "nl -ba django/db/models/enums.py | sed -n '1,240p'",
+    "grep -R --line-number \"to_python\\|get_prep_value\\|__set__\\|setattr\\|from_db_value\" django/db/models/fields | sed -n '1,200p'",
+    "grep -R --line-number \"TextChoices\" tests || true",
+    "nl -ba django/db/models/fields/__init__.py | sed -n '1,260p'",
+    "grep -n \"descriptor_class\" -n django/db/models/fields/__init__.py && nl -ba django/db/models/fields/__init__.py | sed -n '700,920p'",
+    "nl -ba django/db/models/query_utils.py | sed -n '1,260p'",
+    "nl -ba django/db/models/query_utils.py | sed -n '114,220p'",
+    "nl -ba django/db/models/base.py | sed -n '700,920p'",
+    "grep -n \"def __setattr__\" -n django/db/models/base.py && nl -ba django/db/models/base.py | sed -n '1,240p'",
+    "grep -R --line-number \"def __setattr__\" django/db/models || true",
+    "grep -R --line-number \"def __set__\" django/db/models | sed -n '1,200p'",
+    "grep -R --line-number \"class .*Descriptor\" django/db/models/fields | sed -n '1,200p'",
+    "nl -ba django/db/models/base.py | sed -n '1,220p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('django/db/models/query_utils.py')\ns = p.read_text()\nmarker = 'return data[field_name]'\nif 'def __set__(self, instance, value):' in s:\n    print('already patched')\nelse:\n    new_method = (\n        \"\\n\\n    def __set__(self, instance, value):\\n\"\n        \"        # Coerce enum.Enum members to their underlying value on assignment\\n\"\n        \"        import enum\\n\"\n        \"        if isinstance(value, enum.Enum):\\n\"\n        \"            value = value.value\\n\"\n        \"        instance.__dict__[self.field.attname] = value\\n\"\n    )\n    if marker in s:\n        s = s.replace(marker, marker + new_method, 1)\n        p.write_text(s)\n        print('patched')\n    else:\n        print('marker not found; no changes made')\nPY",
+    "python - <<'PY'\nfrom django.db.models.enums import TextChoices, IntegerChoices\nfrom django.db.models.query_utils import DeferredAttribute\n\nclass DummyField:\n    def __init__(self, attname):\n        self.attname = attname\n\n# Test TextChoices\nclass MyTextChoice(TextChoices):\n    FIRST = \"first\", \"The first choice\"\n    SECOND = \"second\", \"The second choice\"\n\nfield = DummyField('my_text')\ndescriptor = DeferredAttribute(field)\ninstance = type('Obj', (), {})()\n\ndescriptor.__set__(instance, MyTextChoice.FIRST)\nassert instance.__dict__['my_text'] == \"first\", \"TextChoices enum member was not coerced to its value\"\n\n# Test IntegerChoices\nclass MyIntChoice(IntegerChoices):\n    ONE = 1, \"One\"\n    TWO = 2, \"Two\"\n\nfield2 = DummyField('my_int')\ndescriptor2 = DeferredAttribute(field2)\ninstance2 = type('Obj2', (), {})()\n\ndescriptor2.__set__(instance2, MyIntChoice.TWO)\nassert instance2.__dict__['my_int'] == 2, \"IntegerChoices enum member was not coerced to its value\"\n\n# Also ensure non-enum values are stored unchanged\ndescriptor.__set__(instance, \"raw\")\nassert instance.__dict__['my_text'] == \"raw\", \"Non-enum value altered unexpectedly\"\n\nprint(\"OK: DeferredAttribute assignment coerces enum members to underlying values\")\nPY",
+    "pytest -q tests/model_enums -q"
+  ]
+}

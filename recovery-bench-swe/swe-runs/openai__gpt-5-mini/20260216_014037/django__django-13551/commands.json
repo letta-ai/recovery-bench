@@ -1,0 +1,13 @@
+{
+  "instance": "django__django-13551",
+  "commands": [
+    "ls -la",
+    "nl -ba django/contrib/auth/tokens.py | sed -n '1,240p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('django/contrib/auth/tokens.py')\ns = p.read_text()\nold = \"return str(user.pk) + user.password + str(login_timestamp) + str(timestamp)\"\nif old not in s:\n    print(\"Expected pattern not found; aborting.\")\nelse:\n    new = \"email = getattr(user, 'email', '')\\n        return str(user.pk) + user.password + str(email) + str(login_timestamp) + str(timestamp)\"\n    s = s.replace(old, new)\n    p.write_text(s)\n    print(\"Updated django/contrib/auth/tokens.py to include user email in token hash\")\nPY",
+    "grep -nR \"PasswordResetTokenGenerator\\|default_token_generator\\|_make_hash_value\" -n .",
+    "pytest tests/auth_tests/test_tokens.py -q",
+    "python -m unittest tests.auth_tests.test_tokens -v",
+    "nl -ba tests/auth_tests/test_tokens.py | sed -n '1,240p'",
+    "python - <<'PY'\nfrom django.conf import settings\nif not settings.configured:\n    settings.configure(SECRET_KEY='test-secret', DEFAULT_HASHING_ALGORITHM='sha256', PASSWORD_RESET_TIMEOUT=3600)\nfrom django.contrib.auth.tokens import PasswordResetTokenGenerator\nfrom datetime import datetime\nclass DummyUser:\n    def __init__(self, pk, password, email, last_login=None):\n        self.pk = pk\n        self.password = password\n        self.email = email\n        self.last_login = last_login\n# Create user and generator\nuser = DummyUser(pk=1, password='pbkdf2_sha256$abc$hash', email='foo@example.com', last_login=None)\ngen = PasswordResetTokenGenerator()\ntoken = gen.make_token(user)\nprint(\"token generated:\", token)\nprint(\"token valid initially:\", gen.check_token(user, token))\n# Change the email and ensure token is invalidated\nuser.email = 'bar@example.com'\nprint(\"token valid after email change:\", gen.check_token(user, token))\n# Exit with non-zero if test failed\nif not (gen.check_token(DummyUser(1,'pbkdf2_sha256$abc$hash','foo@example.com'), token) and not gen.check_token(user, token)):\n    raise SystemExit(1)\nprint(\"SUCCESS\")\nPY"
+  ]
+}

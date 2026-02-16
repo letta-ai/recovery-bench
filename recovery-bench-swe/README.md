@@ -37,7 +37,6 @@ python -m recovery-bench-swe.src.generate_traces \
 ### Options:
 - `--dataset`: SWEBench dataset to generate traces from (required)
 - `--num_trajs`: number of trajectories to generate (optional, default = 50)
-- `--run-id`: Custom run identifier (required)
 - `--model`: LiteLLM compatible model (required)
 - `--subset`: SWEBench subset to use (required)
 - `--max-workers`: Number of concurrent processes for SWE-bench evaluation (optional, default = 4)
@@ -48,7 +47,7 @@ python -m recovery-bench-swe.src.generate_traces \
 Use command from toplevel directory
 ```bash
 python -m recovery-bench-swe.src.run_swe_agent \
-  --trajectory-folder recovery-bench-swe/swe-runs/openai__gpt-5-mini/ \
+  --trajectory-folder recovery-bench-swe/swe-runs/openai__gpt-5-mini/20260216_014037 \
   --model-name openai/gpt-5 \
   --run-id 0.0.2 \
   --recovery-mode environment_only

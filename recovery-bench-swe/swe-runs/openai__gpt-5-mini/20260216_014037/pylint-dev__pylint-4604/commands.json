@@ -1,0 +1,19 @@
+{
+  "instance": "pylint-dev__pylint-4604",
+  "commands": [
+    "ls -la && find testbed -maxdepth 3 -type f -name '*.py' -print",
+    "grep -R --line-number -n \"W0611\\|unused-import\" pylint || true",
+    "nl -ba pylint/checkers/variables.py | sed -n '1,260p'",
+    "nl -ba pylint/checkers/variables.py | sed -n '1660,1710p'",
+    "grep -R --line-number -n \"type_comment\\|type comment\\|type_comment\" pylint || true",
+    "nl -ba pylint/checkers/variables.py | sed -n '820,880p'",
+    "nl -ba pylint/checkers/variables.py | sed -n '1180,1270p'",
+    "grep -n \"_store_type_annotation_node\\|_store_type_annotation_names\" -n pylint/checkers/variables.py && nl -ba pylint/checkers/variables.py | sed -n '1266,1360p'",
+    "nl -ba pylint/checkers/variables.py | sed -n '1808,1870p'",
+    "grep -n \"_type_annotation_names\" pylint/checkers/variables.py || true",
+    "nl -ba pylint/checkers/variables.py | sed -n '1980,2060p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('pylint/checkers/variables.py')\ns = p.read_text()\nold = \"\"\"    def _store_type_annotation_node(self, type_annotation):\n        \\\"\\\"\\\"Given a type annotation, store all the name nodes it refers to\\\"\\\"\\\"\n        if isinstance(type_annotation, astroid.Name):\n            self._type_annotation_names.append(type_annotation.name)\n            return\n\n        if not isinstance(type_annotation, astroid.Subscript):\n            return\n\n        if (\n            isinstance(type_annotation.value, astroid.Attribute)\n            and isinstance(type_annotation.value.expr, astroid.Name)\n            and type_annotation.value.expr.name == TYPING_MODULE\n        ):\n            self._type_annotation_names.append(TYPING_MODULE)\n            return\n\n        self._type_annotation_names.extend(\n            annotation.name\n            for annotation in type_annotation.nodes_of_class(astroid.Name)\n        )\n\"\"\"\nnew = \"\"\"    def _store_type_annotation_node(self, type_annotation):\n        \\\"\\\"\\\"Given a type annotation, store all the name nodes it refers to\\\"\\\"\\\"\n        # Direct name like `ABC`\n        if isinstance(type_annotation, astroid.Name):\n            self._type_annotation_names.append(type_annotation.name)\n            return\n\n        # Attribute like `abc.ABC` should record the base/module name(s)\n        if isinstance(type_annotation, astroid.Attribute):\n            self._type_annotation_names.extend(\n                annotation.name for annotation in type_annotation.nodes_of_class(astroid.Name)\n            )\n            return\n\n        # Handle subscriptions like `List[int]` or `typing.List[int]`\n        if not isinstance(type_annotation, astroid.Subscript):\n            return\n\n        # Special-case typing module attributes like `typing.List[int]`\n        if (\n            isinstance(type_annotation.value, astroid.Attribute)\n            and isinstance(type_annotation.value.expr, astroid.Name)\n            and type_annotation.value.expr.name == TYPING_MODULE\n        ):\n            self._type_annotation_names.append(TYPING_MODULE)\n            return\n\n        # Fallback: collect any Name nodes inside the annotation\n        self._type_annotation_names.extend(\n            annotation.name\n            for annotation in type_annotation.nodes_of_class(astroid.Name)\n        )\n\"\"\"\nif old in s:\n    s = s.replace(old, new)\n    p.write_text(s)\n    print(\"patched\")\nelse:\n    print(\"pattern not found; aborting\")\n    raise SystemExit(1)\nPY",
+    "cat <<'PY' > /tmp/a.py\n\"\"\"Docstring.\"\"\"\n\nimport abc\nfrom abc import ABC\n\nX = ...  # type: abc.ABC\nY = ...  # type: ABC\nPY\npylint /tmp/a.py --disable=all --enable=unused-import || true",
+    "pytest -q tests -k variables -q || true"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "instance": "django__django-16263",
+  "commands": [
+    "ls -la",
+    "grep -R \"def count(\" -n django | sed -n '1,200p'",
+    "nl -ba django/db/models/query.py | sed -n '1,260p'",
+    "nl -ba django/db/models/query.py | sed -n '580,700p'",
+    "grep -n \"def get_count\" -R django | sed -n '1,200p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '480,640p'",
+    "grep -nE \"annotation_select_mask|set_annotation_mask|annotations\\[\" -n django/db/models/sql -R | sed -n '1,200p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1000,1250p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '2320,2388p'",
+    "grep -nE \"annotation_select|annotation_select_mask|annotations\\[\" -n django/db/models/sql/query.py | sed -n '1,240p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '2408,2460p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '2200,2280p'",
+    "grep -n \"refs_expression\" -R django | sed -n '1,200p'",
+    "nl -ba django/db/models/query_utils.py | sed -n '320,420p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '392,560p'",
+    "grep -n \"\\.refs\" -R django | sed -n '1,200p'",
+    "grep -n \"where\" -n django/db/models/sql/query.py | sed -n '1,200p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1580,1960p'",
+    "nl -ba django/db/models/sql/where.py | sed -n '1,240p'",
+    "python - <<'PY'\nfrom pathlib import Path\nimport re\np = Path(\"django/db/models/sql/query.py\")\ns = p.read_text()\npattern = re.compile(\n    r\"def get_count\\(self, using\\):\\n\\s+\\\"\\\"\\\"[\\s\\S]*?\\\"\\\"\\\"\\n\\s+obj = self.clone\\(\\)\\n\\s+obj.add_annotation\\(Count\\(\\\"\\*\\\"\\), alias=\\\"__count\\\", is_summary=True\\)\\n\\s+return obj.get_aggregation\\(using, \\[\\\"__count\\\"\\]\\)\\[\\\"__count\\\"\\]\\n\",\n    re.M,\n)\nnew = '''def get_count(self, using):\n        \"\"\"\n        Perform a COUNT() query using the current filter constraints.\n\n        Strip out annotations that are not referenced by filters, other\n        annotations, ordering or grouping to avoid unnecessary work in the\n        COUNT query.\n        \"\"\"\n        obj = self.clone()\n\n        # Gather referenced annotation aliases from WHERE, ORDER BY, GROUP BY\n        # and extra ordering. We recursively traverse expressions looking for\n        # Ref instances which reference annotation aliases.\n        referenced = set()\n\n        def collect_refs(expr):\n            if expr is None:\n                return\n            # Ref instances reference annotations by .refs\n            if isinstance(expr, Ref):\n                referenced.add(expr.refs)\n                return\n            # If a sequence, traverse its items.\n            if isinstance(expr, (list, tuple)):\n                for e in expr:\n                    collect_refs(e)\n                return\n            # WhereNode and other nodes expose children or source expressions.\n            get_src = getattr(expr, \"get_source_expressions\", None)\n            if callable(get_src):\n                for sub in get_src():\n                    collect_refs(sub)\n                return\n            # tree.Node like WhereNode have .children\n            children = getattr(expr, \"children\", None)\n            if children:\n                for c in children:\n                    collect_refs(c)\n\n        # Collect refs from WHERE, ORDER BY, EXTRA ORDER BY and GROUP BY.\n        collect_refs(obj.where)\n        for expr in getattr(obj, \"order_by\", ()):\n            collect_refs(expr)\n        for expr in getattr(obj, \"extra_order_by\", ()):\n            collect_refs(expr)\n        if getattr(obj, \"group_by\", None):\n            collect_refs(obj.group_by)\n\n        # Expand dependencies: if an annotation references other annotations,\n        # include those too.\n        changed = True\n        while changed:\n            changed = False\n            for name in list(referenced):\n                if name in obj.annotations:\n                    before = len(referenced)\n                    collect_refs(obj.annotations[name])\n                    if len(referenced) != before:\n                        changed = True\n\n        # Apply an annotation mask to keep only referenced annotations\n        # (or none).\n        if referenced:\n            obj.set_annotation_mask(referenced)\n        else:\n            # Use an empty mask to indicate no annotation_select items should be\n            # returned from the SELECT clause.\n            obj.set_annotation_mask(())\n\n        obj.add_annotation(Count(\\\"*\\\"), alias=\\\"__count\\\", is_summary=True)\n        return obj.get_aggregation(using, [\\\"__count\\\"])[\\\"__count\\\"]\n'''\nif not pattern.search(s):\n    raise SystemExit(\"get_count pattern not found; aborting\")\ns2 = pattern.sub(new, s, count=1)\np.write_text(s2)\nprint(\"patched\")\nPY",
+    "nl -ba django/db/models/sql/query.py | sed -n '1088,1140p' && python -c \"import django, sys; print('django imported, version', django.get_version())\"",
+    "pytest -q",
+    "python -m compileall -q ."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "instance": "django__django-15554",
+  "commands": [
+    "ls -la",
+    "grep -R \"class FilteredRelation\" -n django || true",
+    "nl -ba django/db/models/query_utils.py | sed -n '1,240p'",
+    "nl -ba django/db/models/query_utils.py | sed -n '240,520p'",
+    "grep -nR \"filtered_relation\" -n django | sed -n '1,200p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1,260p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1480,1700p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1568,1620p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '760,840p'",
+    "grep -n \"add_filtered_relation\" -n django | sed -n '1,200p'",
+    "grep -nR \"add_filtered_relation\" django || true",
+    "nl -ba django/db/models/query.py | sed -n '1360,1425p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1760,1860p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1860,2060p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '2080,2320p'",
+    "grep -n \"def join(\" -n django/db/models/sql/query.py || true",
+    "nl -ba django/db/models/sql/query.py | sed -n '980,1060p'",
+    "nl -ba django/db/models/sql/datastructures.py | sed -n '1,260p'",
+    "applypatch << 'PATCH'\n*** Begin Patch\n*** Update File: django/db/models/sql/datastructures.py\n@@\n     def equals(self, other):\n-        # Ignore filtered_relation in equality check.\n-        return self.identity[:-1] == other.identity[:-1]\n+        \"\"\"\n+        Determine whether this join is equal to another join for the purpose\n+        of join reuse. Previously filtered_relation was ignored which caused\n+        joins that differ only by their filtered_relation (i.e. different\n+        FilteredRelation conditions) to be treated as identical. That made\n+        it impossible to have multiple filtered joins for the same relation\n+        with distinct conditions.\n+\n+        Consider the full identity, including filtered_relation, so that\n+        joins with different FilteredRelation.condition are not reused.\n+        \"\"\"\n+        return self.identity == other.identity\n*** End Patch\nPATCH",
+    "python - <<'PY'\nfrom pathlib import Path\nimport re\np = Path(\"django/db/models/sql/datastructures.py\")\ns = p.read_text()\nold = (\n    \"    def equals(self, other):\\n\"\n    \"        # Ignore filtered_relation in equality check.\\n\"\n    \"        return self.identity[:-1] == other.identity[:-1]\\n\"\n)\nif old in s:\n    new = (\n        \"    def equals(self, other):\\n\"\n        \"        \\\"\\\"\\\"\\n\"\n        \"        Determine whether this join is equal to another join for the purpose\\n\"\n        \"        of join reuse. Previously filtered_relation was ignored which caused\\n\"\n        \"        joins that differ only by their filtered_relation (i.e. different\\n\"\n        \"        FilteredRelation conditions) to be treated as identical. That made\\n\"\n        \"        it impossible to have multiple filtered joins for the same relation\\n\"\n        \"        with distinct conditions.\\n\\n\"\n        \"        Consider the full identity, including filtered_relation, so that\\n\"\n        \"        joins with different FilteredRelation.condition are not reused.\\n\"\n        \"        \\\"\\\"\\\"\\n\"\n        \"        return self.identity == other.identity\\n\"\n    )\n    s = s.replace(old, new)\n    p.write_text(s)\n    print(\"patched\")\nelse:\n    print(\"pattern not found\")\nPY",
+    "pytest tests/model_filters -q",
+    "nl -ba django/db/models/sql/datastructures.py | sed -n '140,176p'",
+    "python - <<'PY'\nfrom django.db.models.sql.datastructures import Join\nfrom django.db.models.sql.query import FilteredRelation\nfrom django.db.models.fields.related import ForeignObject\n# Create dummy join_field-like object with minimal needed attributes\nclass DummyJoinField:\n    def get_joining_columns(self): return [( 'a', 'b')]\n    def get_extra_restriction(self, a,b): return None\n    related_fields = []\n    foreign_related_fields = []\n    def __init__(self): pass\n\njf = DummyJoinField()\nfr1 = FilteredRelation(\"rel\", condition=__import__('django').db.models.query_utils.Q(foo=1))\nfr2 = FilteredRelation(\"rel\", condition=__import__('django').db.models.query_utils.Q(foo=2))\nj1 = Join('table', 'parent', None, 'JOIN', jf, True, filtered_relation=fr1)\nj2 = Join('table', 'parent', None, 'JOIN', jf, True, filtered_relation=fr2)\nprint(\"equals:\", j1.equals(j2))\nprint(\"__eq__:\", j1 == j2)\nPY",
+    "python - <<'PY'\nfrom django.db.models.sql.datastructures import Join\nfrom django.db.models.query_utils import FilteredRelation, Q\n# Dummy join_field providing required attributes/methods\nclass DummyJoinField:\n    def get_joining_columns(self): return [('lhs_col','rhs_col')]\n    def get_extra_restriction(self, a, b): return None\n    related_fields = []\n    foreign_related_fields = []\n    def __repr__(self): return \"<DummyJoinField>\"\njf = DummyJoinField()\nfr1 = FilteredRelation(\"rel\", condition=Q(foo=1))\nfr2 = FilteredRelation(\"rel\", condition=Q(foo=2))\nj1 = Join('table','parent','alias','JOIN', jf, True, filtered_relation=fr1)\nj2 = Join('table','parent','alias','JOIN', jf, True, filtered_relation=fr2)\nprint(\"equals:\", j1.equals(j2))\nprint(\"__eq__:\", j1 == j2)\nPY",
+    "grep -nR \"Ignore filtered_relation\" -n || true"
+  ]
+}

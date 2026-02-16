@@ -1,0 +1,17 @@
+{
+  "instance": "django__django-16950",
+  "commands": [
+    "ls -la",
+    "grep -R \"UUIDField\\|uuid.uuid4\\|to_field='id'\\|to_field=\\\"id\\\"\" -n",
+    "grep -n \"to_field\" -n django/contrib/admin || true",
+    "grep -Rn \"to_field\" django/contrib/admin || true",
+    "nl -ba django/contrib/admin/options.py | sed -n '1,320p'",
+    "nl -ba django/contrib/admin/options.py | sed -n '1350,1510p'",
+    "grep -n \"formset\" -n django/contrib/admin/options.py || true",
+    "nl -ba django/contrib/admin/options.py | sed -n '2240,2310p'",
+    "pytest tests/admin_views -q",
+    "nl -ba django/contrib/admin/options.py | sed -n '1748,1810p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path(\"django/contrib/admin/options.py\")\ns = p.read_text()\nold = \"\"\"    def get_formset_kwargs(self, request, obj, inline, prefix):\n        formset_params = {\n            \"instance\": obj,\n            \"prefix\": prefix,\n            \"queryset\": inline.get_queryset(request),\n        }\n        if request.method == \"POST\":\n            formset_params.update(\n                {\n                    \"data\": request.POST.copy(),\n                    \"files\": request.FILES,\n                    \"save_as_new\": \"_saveasnew\" in request.POST,\n                }\n            )\n        return formset_params\n\"\"\"\nif old not in s:\n    raise SystemExit(\"Expected function snippet not found; aborting\")\nnew = \"\"\"    def get_formset_kwargs(self, request, obj, inline, prefix):\n        # Provide an unsaved parent instance for POST requests when adding a new\n        # parent object (obj is None). This ensures field default callables\n        # (e.g. UUIDField(default=uuid.uuid4)) are populated for inline formsets\n        # that reference a non-primary-key to_field.\n        formset_params = {\n            \"instance\": obj if obj is not None else (self.model() if request.method == \"POST\" else None),\n            \"prefix\": prefix,\n            \"queryset\": inline.get_queryset(request),\n        }\n        if request.method == \"POST\":\n            formset_params.update(\n                {\n                    \"data\": request.POST.copy(),\n                    \"files\": request.FILES,\n                    \"save_as_new\": \"_saveasnew\" in request.POST,\n                }\n            )\n        return formset_params\n\"\"\"\ns = s.replace(old, new)\np.write_text(s)\nprint(\"Patched\", p)\nPY",
+    "python -m py_compile django/contrib/admin/options.py"
+  ]
+}

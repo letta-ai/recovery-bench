@@ -1,0 +1,16 @@
+{
+  "instance": "django__django-11885",
+  "commands": [
+    "ls -la && grep -R \"Collector\" -n || true && grep -R \"on_delete\" -n || true && grep -R \"fast delete\" -n || true && grep -R \"fast\" -n || true && grep -R \"DELETE FROM\" -n || true",
+    "nl -ba django/db/models/deletion.py | sed -n '1,240p'",
+    "nl -ba django/db/models/deletion.py | sed -n '240,520p'",
+    "nl -ba django/db/models/deletion.py | sed -n '120,220p'",
+    "grep -n \"def _raw_delete\" -R django | sed -n '1,200p'",
+    "nl -ba django/db/models/query.py | sed -n '680,820p'",
+    "grep -n \"class DeleteQuery\" -R django/db/models | sed -n '1,200p'",
+    "nl -ba django/db/models/sql/subqueries.py | sed -n '1,320p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('django/db/models/deletion.py')\ns = p.read_text()\nold = \"\"\"            # fast deletes\n            for qs in self.fast_deletes:\n                count = qs._raw_delete(using=self.using)\n                deleted_counter[qs.model._meta.label] += count\n\"\"\"\nif old in s:\n    new = \"\"\"            # fast deletes\n            # Combine fast delete querysets by model to reduce DB roundtrips.\n            fast_deletes_by_model = {}\n            for qs in self.fast_deletes:\n                # qs is expected to be a QuerySet-like object with a .model attribute.\n                model = getattr(qs, 'model', None)\n                fast_deletes_by_model.setdefault(model, []).append(qs)\n            for model, qss in fast_deletes_by_model.items():\n                # Single queryset: keep existing fast path.\n                if len(qss) == 1:\n                    count = qss[0]._raw_delete(using=self.using)\n                    deleted_counter[model._meta.label] += count\n                else:\n                    # Multiple querysets for the same model: combine by primary keys.\n                    # Fall back to collecting PKs and doing a single delete_batch.\n                    pks = []\n                    for qs in qss:\n                        pks.extend(list(qs.values_list('pk', flat=True)))\n                    if not pks:\n                        continue\n                    count = sql.DeleteQuery(model).delete_batch(pks, self.using)\n                    deleted_counter[model._meta.label] += count\n\"\"\"\n    s = s.replace(old, new)\n    p.write_text(s)\n    print(\"patched\")\nelse:\n    print(\"pattern not found\")\nPY",
+    "pytest -q tests/delete/tests.py::FastDeleteTests::test_fast_delete_m2m -q",
+    "python -m py_compile django/db/models/deletion.py"
+  ]
+}

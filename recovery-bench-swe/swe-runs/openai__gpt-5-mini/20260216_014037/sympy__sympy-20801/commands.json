@@ -1,0 +1,24 @@
+{
+  "instance": "sympy__sympy-20801",
+  "commands": [
+    "ls -la",
+    "grep -R \"class Float\" -n sympy || true",
+    "nl -ba sympy/core/numbers.py | sed -n '1,260p'",
+    "grep -R \"class False\" -n sympy || true",
+    "grep -R \"false\" -n sympy || true",
+    "nl -ba sympy/logic/boolalg.py | sed -n '320,460p'",
+    "grep -n \"def __eq__\" -n sympy/logic -R || true",
+    "nl -ba sympy/core/numbers.py | sed -n '820,980p'",
+    "grep -R \"def __eq__\" -n sympy | sed -n '1,200p'",
+    "nl -ba sympy/core/numbers.py | sed -n '740,800p'",
+    "nl -ba sympy/core/basic.py | sed -n '1,220p'",
+    "nl -ba sympy/core/logic.py | sed -n '1,320p'",
+    "grep -n \"class BooleanAtom\" -R sympy || true",
+    "nl -ba sympy/logic/boolalg.py | sed -n '1,240p'",
+    "nl -ba sympy/core/numbers.py | sed -n '1360,1420p'",
+    "grep -n \"def __eq__\" -n sympy/core/basic.py || true",
+    "nl -ba sympy/core/basic.py | sed -n '300,380p'",
+    "grep -n \"def __bool__\" -n sympy | sed -n '1,200p'",
+    "python3 - <<'PY'\nfrom pathlib import Path\np = Path('sympy/logic/boolalg.py')\ns = p.read_text()\n\n# Ensure SympifyError is imported\nimport_line = \"from sympy.core.sympify import converter, _sympify, sympify\"\nif import_line in s and \"SympifyError\" not in s:\n    s = s.replace(import_line, import_line + \", SympifyError\")\n\n# Prepare the __eq__ method to insert after _op_priority line in BooleanAtom\neq_method = \"\"\"\n    def __eq__(self, other):\n        try:\n            other = _sympify(other)\n        except SympifyError:\n            return NotImplemented\n        # If other is a Number, defer to its __eq__ to allow symmetric\n        # comparison between Numbers (e.g. Float) and Boolean atoms.\n        from sympy.core.numbers import Number as _Number\n        if isinstance(other, _Number) or getattr(other, 'is_Number', False):\n            return other.__eq__(self)\n        from sympy.core.basic import Basic as _Basic\n        return _Basic.__eq__(self, other)\n\"\"\"\n\nmarker = \"_op_priority = 11  # higher than Expr\"\nif marker in s and \"def __eq__(self, other):\" not in s.split(marker,1)[1]:\n    s = s.replace(marker, marker + \"\\n\\n\" + eq_method)\n    p.write_text(s)\n    print(\"patched\")\nelse:\n    print(\"already patched or marker not found\")\n\n# Quick verification\ntry:\n    import importlib, sys\n    sys.path.insert(0, \".\")\n    import sympy\n    importlib.reload(sympy)\n    from sympy import S\n    print(\"S(0.0) == S.false ->\", S(0.0) == S.false)\n    print(\"S.false == S(0.0) ->\", S.false == S(0.0))\nexcept Exception as e:\n    print(\"verification failed:\", e)\nPY"
+  ]
+}
