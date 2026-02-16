@@ -44,7 +44,6 @@ python -m recovery-bench-swe.src.generate_traces \
 - `--clean` : Cleans recovery-bench-swe directory of trajectories in the case generation errors (optional, useful when generate_traces can't pull docker images)
 
 ### 2. Run SWE Recovery Agent
-Use command from toplevel directory
 ```bash
 python -m recovery-bench-swe.src.run_swe_agent \
   --trajectory-folder recovery-bench-swe/swe-runs/openai__gpt-5-mini/20260216_014037 \
