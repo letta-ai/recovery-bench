@@ -1,6 +1,6 @@
 """
 A script containing core utility files, logic, for running Recovery Agent
-on a datset. Predictions and evaluation results paths are relative to
+on a dataset. Predictions and evaluation results paths are relative to
 recovery-bench-swe directory
 """
 
@@ -478,7 +478,7 @@ def reorganize_trajectories(runs_dir: Path):
         # move trajectory to new subdirectory and write a commands.json file 
         new_traj_path = instance_dir / traj_file.name
         shutil.move(str(traj_file), str(new_traj_path))
-        commands_path = instance_dir / "commands.json" #can write instance_id to commands.json file as well (future update)
+        commands_path = instance_dir / "commands.json" 
         
         to_write = {"instance": instance_id, "commands": commands}
         with open(commands_path, 'w') as f:

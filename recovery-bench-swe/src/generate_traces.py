@@ -134,7 +134,6 @@ def run_preds(max_workers: int, run_id : str, dataset_name: Path):
         max_workers (int) - number of threads to parallelize evaluation
         run_id (str) - user inputting unique run identifer
     """
-    #Edit this to be a try block later for pull request
     cwd = get_swe_root_dir()
     preds = get_miniswe_preds()
     if preds == 1:
@@ -217,7 +216,7 @@ def clean_gen_trajs(dirty_states: list, repos: list, model: str, time: str):
     if not swe_runs.exists():
         os.mkdir(str(swe_runs))
 
-    #Output directory for weak minisweagent is assumed to by ../../generate_traces.py
+    #Output directory for weak minisweagent is assumed to by recovery-bench-swe/
     try:
         for p in swe_root.iterdir():
             p_str = str(p)   
@@ -236,7 +235,6 @@ def clean_gen_trajs(dirty_states: list, repos: list, model: str, time: str):
         return 1
 
 
-#Before calling, need to check which trajectories failed
 def organize_directory(
     swe_data: dict, 
     model: str,
@@ -266,7 +264,6 @@ def organize_directory(
         print("Error: swe runs path does not exist")
         return 1
 
-    #First move trajectories that are unresolved to swe_runs directory, delete ones that are resolved
     dirty_states = get_unresolved_tasks(model, run_id)
     if dirty_states == 1:
         return 1
@@ -278,7 +275,6 @@ def organize_directory(
     clean_failed = clean_gen_trajs(dirty_states, repos, model, time)
     if clean_failed:
         return 1
-    
     return 0
 
 def get_tsk(swe_data: dict, inst_id: str):

@@ -1,7 +1,5 @@
 """
-Run replay/recovery agent or default agent.
-
-This script runs the desired swe agent on collected trajectories for swebench.
+Run replay/recovery agent or default agent on collected trajectories for SWE-Bench.
 """
 
 import argparse
@@ -14,7 +12,6 @@ def main():
         description="Run mini-swe-agent for all trajectories"
     )
 
-    #Dirty State Trajectories for weak mini-swe-agent
     parser.add_argument(
         "--trajectory-folder",
         type=str,
@@ -22,31 +19,27 @@ def main():
         help="Path to the trajectory folder",
     )
 
-    #Valid mini-swe-agent model
     parser.add_argument(
         "--model", 
         type=str, 
         required=True, 
-        help="Name of the model to use"
+        help="Name of the minisweagent litellmm compatible model to use"
     )
 
-    #RunID if user specifies
     parser.add_argument(
         "--run-id",
         type=str,
         required=True,
-        help='ID associated with a run'
+        help='Unique ID associated with a run'
     )
 
-    #Specify the max number of workers
     parser.add_argument(
         "--max-workers",
         type=int,
         default=1,
-        help='Max Workers for SWEBench Evaluator'
+        help='Max workers for SWEBench Evaluator'
     )
 
-    #Specify how much history context wanted for mini-swe-agent
     parser.add_argument(
         "--recovery-mode",
         choices=["environment_only", "action_summary", "full_history"],
@@ -60,7 +53,6 @@ def main():
         help="Run's the Default Agent on the Recovery-Bench dataset"
     )
 
-    #Check if the path to mini-swe-agent trajectories is valid
     args, unknown_args = parser.parse_known_args()
     trajectory_folder = Path(args.trajectory_folder)
     if not trajectory_folder or not trajectory_folder.exists():
@@ -69,8 +61,6 @@ def main():
     
     #Make CWD recovery-bench-swe
     swe_root = Path(__file__).parent.parent
-    
-    #Collect args for run_replay_agent_swe
     model = args.model
     recovery_mode = args.recovery_mode
     run_id = args.run_id
