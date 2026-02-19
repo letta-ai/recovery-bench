@@ -52,8 +52,12 @@ def generate_initial_traces(
     ]
 
     # Use custom agent or default to terminus-2
-    if agent_import_path:
+    if agent_import_path and ":" in agent_import_path:
+        # Import path format (e.g., module.path:ClassName)
         cmd.extend(["--agent-import-path", agent_import_path])
+    elif agent_import_path:
+        # Built-in agent name (e.g., terminus-2)
+        cmd.extend(["--agent", agent_import_path])
     else:
         cmd.extend(["--agent", "terminus-2"])
 
@@ -157,7 +161,7 @@ def main():
         "--initial-agent",
         type=str,
         default=None,
-        help="Agent import path for initial runs (e.g., recovery_bench.letta_code_agent:LettaCode). Defaults to terminus-2.",
+        help="Agent for initial runs: built-in name (e.g., terminus-2) or import path (e.g., recovery_bench.letta_code_agent:LettaCode). Defaults to terminus-2.",
     )
     parser.add_argument(
         "--recovery-agent",
