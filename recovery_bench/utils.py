@@ -1,10 +1,13 @@
 import hashlib
+import logging
 import subprocess
 import json
 import os
 import shutil
 from pathlib import Path
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 
 def create_task_hash(task_description: str) -> str:
@@ -14,7 +17,7 @@ def create_task_hash(task_description: str) -> str:
 
 def cleanup_docker():
     """Clean up Docker containers and system resources."""
-    print("Cleaning up Docker containers and system resources...")
+    logger.info("Cleaning up Docker containers and system resources...")
 
     # Remove all containers (running and stopped)
     try:
@@ -22,11 +25,11 @@ def cleanup_docker():
             "docker rm $(docker ps -aq) -f", shell=True, capture_output=True, text=True
         )
         if result.returncode == 0:
-            print("Successfully removed Docker containers")
+            logger.info("Successfully removed Docker containers")
         else:
-            print(f"Docker rm command output: {result.stderr}")
+            logger.warning(f"Docker rm command output: {result.stderr}")
     except Exception as e:
-        print(f"Error removing Docker containers: {e}")
+        logger.error(f"Error removing Docker containers: {e}")
 
     # Clean up Docker system
     try:
@@ -34,11 +37,11 @@ def cleanup_docker():
             ["docker", "system", "prune", "-f"], capture_output=True, text=True
         )
         if result.returncode == 0:
-            print("Successfully cleaned up Docker system")
+            logger.info("Successfully cleaned up Docker system")
         else:
-            print(f"Docker system prune failed: {result.stderr}")
+            logger.warning(f"Docker system prune failed: {result.stderr}")
     except Exception as e:
-        print(f"Error cleaning up Docker system: {e}")
+        logger.error(f"Error cleaning up Docker system: {e}")
 
 
 def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
@@ -67,16 +70,16 @@ def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
         reward = rewards.get("reward", 0.0)
         if reward > 0:
             if print_output:
-                print(f"Skipping {task_id}: resolved (reward={reward})")
+                logger.debug(f"Skipping {task_id}: resolved (reward={reward})")
             continue
         
         task_name = results.get("task_name", task_id)
         unsolved_ids.append(task_name)
 
     if print_output:
-        print(f"Found {len(unsolved_ids)} unsolved tasks")
+        logger.info(f"Found {len(unsolved_ids)} unsolved tasks")
         for task_id in unsolved_ids:
-            print(f"  {task_id}")
+            logger.debug(f"  {task_id}")
 
     return unsolved_ids
 
@@ -176,11 +179,11 @@ def _extract_instruction_from_atif(trajectory_file: Path) -> str | None:
 
 def reorganize_directories(base_path: str) -> None:
     """Reorganize directories by adding task hash prefix based on trajectory instruction."""
-    print(f"Reorganizing {base_path}")
+    logger.info(f"Reorganizing {base_path}")
 
     base_path = Path(base_path)
     if not base_path.exists():
-        print("Path does not exist")
+        logger.warning("Path does not exist")
         return
 
     task_to_hash = {}
@@ -192,16 +195,16 @@ def reorganize_directories(base_path: str) -> None:
         task_name = task_dir.name
         
         if is_hash_prefixed_directory(task_name):
-            print(f"  {task_name} -> SKIPPED (already has hash prefix)")
+            logger.debug(f"  {task_name} -> SKIPPED (already has hash prefix)")
             continue
 
         instruction = extract_instruction_from_trajectory(task_dir)
         if instruction:
             task_hash = create_task_hash(instruction)
             task_to_hash[task_dir] = task_hash
-            print(f"  {task_name} -> {task_hash}")
+            logger.debug(f"  {task_name} -> {task_hash}")
         else:
-            print(f"  {task_name} -> SKIPPED (no trajectory.json or instruction)")
+            logger.debug(f"  {task_name} -> SKIPPED (no trajectory.json or instruction)")
 
     for task_dir, task_hash in task_to_hash.items():
         task_name = task_dir.name
@@ -209,22 +212,22 @@ def reorganize_directories(base_path: str) -> None:
 
         try:
             shutil.move(str(task_dir), str(new_task_dir))
-            print(f"    Renamed to {task_hash}-{task_name}")
+            logger.debug(f"    Renamed to {task_hash}-{task_name}")
         except Exception as e:
-            print(f"    Error renaming {task_dir}: {e}")
+            logger.error(f"    Error renaming {task_dir}: {e}")
 
-    print(f"Processed {len(task_to_hash)} tasks")
+    logger.info(f"Processed {len(task_to_hash)} tasks")
 
 
 def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     """Run a command and return the result."""
-    print(f"Running: {' '.join(cmd)}")
+    logger.info(f"Running: {' '.join(cmd)}")
     if env is None:
         env = os.environ.copy()
 
     result = subprocess.run(cmd, env=env, cwd=cwd, capture_output=False, text=True)
     if result.returncode != 0:
-        print(f"Command failed with return code {result.returncode}")
+        logger.error(f"Command failed with return code {result.returncode}")
         return result
     return result
 
@@ -256,7 +259,7 @@ def run_recovery(
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
 
-    print(f"Running: {' '.join(cmd)}")
+    logger.info(f"Running: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, env=env, check=True)
@@ -264,5 +267,5 @@ def run_recovery(
     except subprocess.CalledProcessError as e:
         return e.returncode
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return 1

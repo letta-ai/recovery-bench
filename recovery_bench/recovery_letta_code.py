@@ -8,11 +8,14 @@ This agent extends LettaCode to:
 """
 
 import json
+import logging
 import os
 import shlex
 from pathlib import Path
 
 from recovery_bench.letta_code_agent import LettaCode
+
+logger = logging.getLogger(__name__)
 from recovery_bench.utils import create_task_hash
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
@@ -44,7 +47,7 @@ class RecoveryLettaCode(LettaCode):
         base_path = Path(self._trajectory_folder)
         
         if not base_path.exists():
-            print(f"Trajectory folder not found: {base_path}")
+            logger.warning(f"Trajectory folder not found: {base_path}")
             return None
 
         # Look for hash-prefixed directories (format: <hash>-<task-id>__<suffix>/)
@@ -56,10 +59,10 @@ class RecoveryLettaCode(LettaCode):
                 if agent_dir.exists():
                     for f in agent_dir.iterdir():
                         if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                            print(f"Found LettaCode trajectory for hash {task_hash}: {item}")
+                            logger.debug(f"Found LettaCode trajectory for hash {task_hash}: {item}")
                             return item
 
-        print(f"No LettaCode trajectory found for hash {task_hash} in {base_path}")
+        logger.warning(f"No LettaCode trajectory found for hash {task_hash} in {base_path}")
         return None
 
     def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
@@ -70,7 +73,7 @@ class RecoveryLettaCode(LettaCode):
         Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
         """
         task_hash = create_task_hash(instruction)
-        print(f"Looking for trajectory with hash: {task_hash}")
+        logger.debug(f"Looking for trajectory with hash: {task_hash}")
         
         trajectory_folder = self._find_trajectory_folder(task_hash)
         if trajectory_folder is None:
@@ -83,7 +86,7 @@ class RecoveryLettaCode(LettaCode):
                 if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
                     return self._parse_letta_events(f)
 
-        print(f"No LettaCode events found in {trajectory_folder}")
+        logger.warning(f"No LettaCode events found in {trajectory_folder}")
         return []
 
     def _parse_letta_events(self, events_file: Path) -> list[dict]:
@@ -94,7 +97,7 @@ class RecoveryLettaCode(LettaCode):
         
         Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
         """
-        print(f"Parsing LettaCode events from {events_file}")
+        logger.debug(f"Parsing LettaCode events from {events_file}")
         
         # Collect argument fragments by tool_call_id (preserving order)
         tool_call_fragments: dict[str, list[str]] = {}
@@ -129,7 +132,7 @@ class RecoveryLettaCode(LettaCode):
                                 tool_call_order.append(tool_call_id)
                             tool_call_fragments[tool_call_id].append(args_fragment)
         except Exception as e:
-            print(f"Error parsing events file: {e}")
+            logger.error(f"Error parsing events file: {e}")
             return []
 
         # Reconstruct and extract operations (Bash, Write, Edit)
@@ -177,7 +180,7 @@ class RecoveryLettaCode(LettaCode):
         bash_count = sum(1 for op in operations if op["tool"] == "Bash")
         write_count = sum(1 for op in operations if op["tool"] == "Write")
         edit_count = sum(1 for op in operations if op["tool"] == "Edit")
-        print(f"Extracted {len(operations)} operations: {bash_count} Bash, {write_count} Write, {edit_count} Edit")
+        logger.info(f"Extracted {len(operations)} operations: {bash_count} Bash, {write_count} Write, {edit_count} Edit")
         return operations
 
     def _extract_args_regex(self, tool_name: str, full_args: str) -> dict | None:
@@ -253,19 +256,19 @@ class RecoveryLettaCode(LettaCode):
         operations = self._extract_operations_from_trajectory(instruction)
         
         if not operations:
-            print("No operations found in trajectory, running LettaCode fresh")
+            logger.info("No operations found in trajectory, running LettaCode fresh")
         else:
             # 2. Replay operations to corrupt the environment
-            print(f"Replaying {len(operations)} operations from previous trajectory...")
+            logger.info(f"Replaying {len(operations)} operations from previous trajectory...")
             for i, op in enumerate(operations):
                 try:
                     await self._replay_operation(environment, op)
                 except Exception as e:
                     # Continue even if an operation fails
-                    print(f"Replay operation {i+1} ({op['tool']}) failed: {e}")
+                    logger.error(f"Replay operation {i+1} ({op['tool']}) failed: {e}")
                     continue
             
-            print(f"Finished replaying {len(operations)} operations")
+            logger.info(f"Finished replaying {len(operations)} operations")
 
         # 3. Create recovery instruction
         recovery_instruction = (

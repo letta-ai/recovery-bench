@@ -14,8 +14,11 @@ Variants:
 from pathlib import Path
 import os
 import json
+import logging
 from typing import Optional
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 # Harbor imports
 from harbor import BaseAgent, BaseEnvironment, AgentContext
@@ -115,14 +118,14 @@ Set is_task_complete to true when you believe the task is finished.
         commands, messages, n_episodes = self._read_trajectories(instruction)
         
         if len(commands) == 0:
-            print("No commands found in trajectory, starting fresh")
+            logger.info("No commands found in trajectory, starting fresh")
             commands = []
             messages = []
             n_episodes = 0
 
         # Replay commands to restore environment state
         last_output = await self._replay_environment_async(environment, commands)
-        print(f"Replayed {len(commands)} commands from previous trajectory")
+        logger.info(f"Replayed {len(commands)} commands from previous trajectory")
 
         # Set up messages for recovery
         self._add_messages(messages)
@@ -135,7 +138,6 @@ Set is_task_complete to true when you believe the task is finished.
             )
         else:
             recovery_prompt = (
-                f"{self._system_prompt}\n\n"
                 f"Task: {instruction}\n\n"
                 f"Current terminal state:\n{last_output}\n\n"
                 "Previous attempts failed! Please try again with different approaches."
@@ -189,9 +191,9 @@ Set is_task_complete to true when you believe the task is finished.
             trajectory_path.parent.mkdir(parents=True, exist_ok=True)
             with open(trajectory_path, "w") as f:
                 json.dump(trajectory, f, indent=2)
-            print(f"Trajectory saved to {trajectory_path}")
+            logger.info(f"Trajectory saved to {trajectory_path}")
         except Exception as e:
-            print(f"Failed to save trajectory: {e}")
+            logger.error(f"Failed to save trajectory: {e}")
 
     def _add_messages(self, messages: list[dict]) -> None:
         """Add messages to the conversation history."""
@@ -206,7 +208,7 @@ Set is_task_complete to true when you believe the task is finished.
         base_path = Path(self._base_folder)
         
         if not base_path.exists():
-            print(f"Trajectory folder not found: {base_path}")
+            logger.warning(f"Trajectory folder not found: {base_path}")
             return None
 
         # Look for hash-prefixed directories (format: <hash>-<task-id>/)
@@ -215,15 +217,15 @@ Set is_task_complete to true when you believe the task is finished.
                 # Check agent/ subdirectory (Harbor output structure)
                 trajectory_file = item / "agent" / "trajectory.json"
                 if trajectory_file.exists():
-                    print(f"Found trajectory for hash {task_hash}: {item}")
+                    logger.debug(f"Found trajectory for hash {task_hash}: {item}")
                     return item
                 # Fall back to direct path
                 trajectory_file = item / "trajectory.json"
                 if trajectory_file.exists():
-                    print(f"Found trajectory for hash {task_hash}: {item}")
+                    logger.debug(f"Found trajectory for hash {task_hash}: {item}")
                     return item
 
-        print(f"No trajectory found for hash {task_hash} in {base_path}")
+        logger.warning(f"No trajectory found for hash {task_hash} in {base_path}")
         return None
 
     def _read_trajectories(
@@ -231,7 +233,7 @@ Set is_task_complete to true when you believe the task is finished.
     ) -> tuple[list[Command], list[dict], int]:
         """Read commands and messages from ATIF trajectory file."""
         task_hash = create_task_hash(task_description)
-        print(f"Looking for trajectory with hash: {task_hash}")
+        logger.debug(f"Looking for trajectory with hash: {task_hash}")
         trajectory_folder = self._find_trajectory_folder(task_hash)
 
         if trajectory_folder is None:
@@ -302,7 +304,7 @@ Set is_task_complete to true when you believe the task is finished.
     ) -> str:
         """Replay commands in the environment to restore state using TmuxSession."""
         if not self._session:
-            print("Warning: TmuxSession not initialized, cannot replay")
+            logger.warning("TmuxSession not initialized, cannot replay")
             return ""
         
         for command in commands:
@@ -317,7 +319,7 @@ Set is_task_complete to true when you believe the task is finished.
                 # Continue even on timeout
                 continue
             except Exception as e:
-                print(f"Replay error: {e}")
+                logger.error(f"Replay error: {e}")
                 continue
 
         # Get final terminal state
@@ -348,14 +350,14 @@ Set is_task_complete to true when you believe the task is finished.
                 )
                 assistant_content = response.choices[0].message.content
             except Exception as e:
-                print(f"LLM error: {e}")
+                logger.error(f"LLM error: {e}")
                 break
 
             # Add assistant response to messages
             self._messages.append({"role": "assistant", "content": assistant_content})
             
             # Log the response
-            print(f"Agent response: {assistant_content[:200]}...")
+            logger.debug(f"Agent response: {assistant_content[:200]}...")
             
             # Record agent step in trajectory
             self._add_trajectory_step("agent", assistant_content)
@@ -376,7 +378,7 @@ Set is_task_complete to true when you believe the task is finished.
 
             # Check if task is complete (handle both key names)
             if parsed.get("is_task_complete", False) or parsed.get("task_complete", False):
-                print("Agent reported task complete")
+                logger.info("Agent reported task complete")
                 break
 
             # Execute commands using TmuxSession
@@ -394,7 +396,7 @@ Set is_task_complete to true when you believe the task is finished.
                             max_timeout_sec=180.0,
                         )
                     except Exception as e:
-                        print(f"Command error: {e}")
+                        logger.error(f"Command error: {e}")
 
             # Get terminal state after commands
             terminal_output = ""
@@ -405,7 +407,7 @@ Set is_task_complete to true when you believe the task is finished.
                     pass
 
             # Log terminal output
-            print(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
+            logger.debug(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
 
             # Add terminal output to messages for next iteration (avoid empty content)
             observation = terminal_output.strip() if terminal_output.strip() else "(No output)"
