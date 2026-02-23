@@ -76,6 +76,12 @@ def main():
         default=8,
         help="Number of concurrent processes",
     )
+    parser.add_argument(
+        "--agent-kwargs",
+        type=str,
+        default=None,
+        help="JSON string of kwargs to pass to agent (e.g., '{\"model_kwargs\": {\"reasoning_effort\": \"high\"}}')",
+    )
 
     args = parser.parse_args()
 
@@ -106,6 +112,16 @@ def main():
         traces_short = traces_path.name
         job_name = f"recovery-{model_short}-on-{traces_short}"
 
+    # Parse agent kwargs
+    agent_kwargs = None
+    if args.agent_kwargs:
+        import json
+        try:
+            agent_kwargs = json.loads(args.agent_kwargs)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON for --agent-kwargs: {e}")
+            return 1
+
     return run_recovery(
         traces_folder=args.traces,
         model=args.model,
@@ -113,6 +129,7 @@ def main():
         job_name=job_name,
         agent=args.agent,
         n_concurrent=args.n_concurrent,
+        agent_kwargs=agent_kwargs,
     )
 
 

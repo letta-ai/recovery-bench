@@ -51,11 +51,12 @@ class RecoveryTerminus(BaseAgent):
     history, prompting the model to try a different approach.
     """
 
-    def __init__(self, logs_dir=None, model_name: str = "anthropic/claude-sonnet-4-20250514", **kwargs):
+    def __init__(self, logs_dir=None, model_name: str = "anthropic/claude-sonnet-4-20250514", model_kwargs: dict = None, **kwargs):
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
         self._model_name = model_name
+        self._model_kwargs = model_kwargs or {}  # Extra params like reasoning_effort, temperature
         self._max_episodes = 50
         self._messages: list[dict] = []
         self._session: TmuxSession | None = None
@@ -346,7 +347,8 @@ Set is_task_complete to true when you believe the task is finished.
                 response = await litellm.acompletion(
                     model=self._model_name,
                     messages=self._messages,
-                    temperature=0.7,
+                    temperature=self._model_kwargs.get("temperature", 0.7),
+                    **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
                 )
                 assistant_content = response.choices[0].message.content
             except Exception as e:
@@ -469,7 +471,8 @@ class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
             response = litellm.completion(
                 model=self._model_name,
                 messages=summary_messages,
-                temperature=0.3,
+                temperature=0.3,  # Lower temp for summarization
+                **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
             )
             summary = response.choices[0].message.content
         except Exception:
