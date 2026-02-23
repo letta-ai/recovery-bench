@@ -70,7 +70,7 @@ def main():
     parser.add_argument(
         "--n-concurrent",
         type=int,
-        default=4,
+        default=8,
         help="Number of concurrent processes",
     )
 

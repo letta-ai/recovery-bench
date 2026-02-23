@@ -112,12 +112,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate traces pipeline")
     parser.add_argument("model_name", help="Model name to use for trace generation")
     parser.add_argument(
-        "--n-concurrent", type=int, default=4, help="Number of concurrent processes"
+        "--n-concurrent", type=int, default=8, help="Number of concurrent processes"
     )
     parser.add_argument(
         "--max-iterations",
         type=int,
-        default=3,
+        default=1,
         help="Maximum number of recovery iterations",
     )
     parser.add_argument(

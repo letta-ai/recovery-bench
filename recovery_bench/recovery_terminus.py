@@ -135,7 +135,6 @@ Set is_task_complete to true when you believe the task is finished.
             )
         else:
             recovery_prompt = (
-                f"{self._system_prompt}\n\n"
                 f"Task: {instruction}\n\n"
                 f"Current terminal state:\n{last_output}\n\n"
                 "Previous attempts failed! Please try again with different approaches."
