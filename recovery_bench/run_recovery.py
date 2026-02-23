@@ -22,7 +22,10 @@ Examples:
 """
 
 import argparse
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 
 from .utils import (
@@ -70,7 +73,7 @@ def main():
     parser.add_argument(
         "--n-concurrent",
         type=int,
-        default=4,
+        default=8,
         help="Number of concurrent processes",
     )
 
@@ -78,7 +81,7 @@ def main():
 
     traces_path = Path(args.traces)
     if not traces_path.exists():
-        print(f"Error: Traces folder {args.traces} does not exist")
+        logger.error(f"Traces folder {args.traces} does not exist")
         return 1
 
     # Reorganize directories with hash prefixes if needed
@@ -90,10 +93,10 @@ def main():
     else:
         task_ids = get_unsolved_tasks(args.traces)
         if not task_ids:
-            print("No unsolved tasks found in traces folder")
+            logger.warning("No unsolved tasks found in traces folder")
             return 0
 
-    print(f"Running recovery on {len(task_ids)} task(s) with {args.model}")
+    logger.info(f"Running recovery on {len(task_ids)} task(s) with {args.model}")
 
     # Generate job name if not specified
     if args.job_name:
@@ -114,4 +117,8 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+    )
     sys.exit(main())

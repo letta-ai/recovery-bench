@@ -21,6 +21,7 @@ Examples:
 """
 
 import argparse
+import logging
 from datetime import datetime
 from typing import List
 
@@ -32,6 +33,8 @@ from .utils import (
     run_recovery,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def generate_initial_traces(
     model_name: str,
@@ -42,7 +45,7 @@ def generate_initial_traces(
     agent_import_path: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run."""
-    print(f"Generating initial traces for {model_name}...")
+    logger.info(f"Generating initial traces for {model_name}...")
 
     cmd = [
         "harbor",
@@ -86,15 +89,15 @@ def run_recovery_for_unsolved(
     agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
 ) -> str:
     """Run recovery agent for unsolved tasks."""
-    print(f"Running recovery for unsolved tasks in {traces_folder}...")
+    logger.info(f"Running recovery for unsolved tasks in {traces_folder}...")
 
     unsolved_task_ids = get_unsolved_tasks(traces_folder)
 
     if not unsolved_task_ids:
-        print("No unsolved tasks found, skipping recovery.")
+        logger.info("No unsolved tasks found, skipping recovery.")
         return traces_folder
 
-    print(f"Found {len(unsolved_task_ids)} unsolved tasks")
+    logger.info(f"Found {len(unsolved_task_ids)} unsolved tasks")
 
     run_recovery(
         traces_folder=traces_folder,
@@ -112,12 +115,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate traces pipeline")
     parser.add_argument("model_name", help="Model name to use for trace generation")
     parser.add_argument(
-        "--n-concurrent", type=int, default=4, help="Number of concurrent processes"
+        "--n-concurrent", type=int, default=8, help="Number of concurrent processes"
     )
     parser.add_argument(
         "--max-iterations",
         type=int,
-        default=3,
+        default=1,
         help="Maximum number of recovery iterations",
     )
     parser.add_argument(
@@ -182,7 +185,7 @@ def main():
     # Step 1: Generate initial traces or resume from existing
     if args.resume_initial:
         initial_traces_dir = args.resume_initial
-        print(
+        logger.info(
             f"Resuming from existing initial trajectories at {initial_traces_dir}"
         )
     else:
@@ -197,11 +200,11 @@ def main():
         )
 
     if args.run_initial:
-        print(f"Just running initial traces for {args.model_name}")
+        logger.info(f"Just running initial traces for {args.model_name}")
         return
 
     # Step 2: Hash reorganize initial traces
-    print(f"Reorganizing traces in {initial_traces_dir}...")
+    logger.info(f"Reorganizing traces in {initial_traces_dir}...")
     reorganize_directories(initial_traces_dir)
 
     # Keep track of all trace directories
@@ -210,7 +213,7 @@ def main():
     # Step 3: Iteratively run recovery agent on unsolved tasks
     current_traces_dir = initial_traces_dir
     for iteration in range(1, args.max_iterations + 1):
-        print(f"\n--- Starting iteration {iteration} ---")
+        logger.info(f"--- Starting iteration {iteration} ---")
 
         # Get unsolved tasks from current directory
         unsolved_task_ids = get_unsolved_tasks(
@@ -218,10 +221,10 @@ def main():
         )
 
         if not unsolved_task_ids:
-            print(f"No unsolved tasks found in iteration {iteration}, stopping.")
+            logger.info(f"No unsolved tasks found in iteration {iteration}, stopping.")
             break
 
-        print(
+        logger.info(
             f"Found {len(unsolved_task_ids)} unsolved tasks for iteration {iteration}"
         )
 
@@ -238,7 +241,7 @@ def main():
         )
 
         # Hash reorganize the new traces
-        print(f"Reorganizing traces in {recovery_traces_dir}...")
+        logger.info(f"Reorganizing traces in {recovery_traces_dir}...")
         reorganize_directories(recovery_traces_dir)
 
         # Add to list of all trace directories
@@ -247,10 +250,14 @@ def main():
         # Update current directory for next iteration
         current_traces_dir = recovery_traces_dir
 
-    print(f"\n--- Pipeline completed successfully! ---")
-    print(f"Initial traces: {initial_traces_dir}")
-    print(f"All trace directories: {all_trace_dirs}")
+    logger.info("--- Pipeline completed successfully! ---")
+    logger.info(f"Initial traces: {initial_traces_dir}")
+    logger.info(f"All trace directories: {all_trace_dirs}")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+    )
     main()
