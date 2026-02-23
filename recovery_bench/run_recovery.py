@@ -48,8 +48,14 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        required=True,
-        help="Model to use for replay (e.g., anthropic/claude-opus-4-5-20251101)",
+        default=None,
+        help="Model to use for recovery (e.g., anthropic/claude-opus-4-5-20251101)",
+    )
+    parser.add_argument(
+        "--model-config",
+        type=str,
+        default=None,
+        help="Path to model config JSON file (e.g., configs/models/o3-mini-high.json)",
     )
     parser.add_argument(
         "--agent",
@@ -85,6 +91,35 @@ def main():
 
     args = parser.parse_args()
 
+    # Load model config if provided
+    import json
+    model = args.model
+    model_kwargs = {}
+    
+    if args.model_config:
+        config_path = Path(args.model_config)
+        if not config_path.exists():
+            logger.error(f"Model config file not found: {args.model_config}")
+            return 1
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            model = config.get("model", model)
+            model_kwargs = config.get("model_kwargs", {})
+            logger.info(f"Loaded model config from {args.model_config}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in model config: {e}")
+            return 1
+
+    # CLI --model overrides config
+    if args.model:
+        model = args.model
+
+    # Validate model is provided
+    if not model:
+        logger.error("Model must be specified via --model or --model-config")
+        return 1
+
     traces_path = Path(args.traces)
     if not traces_path.exists():
         logger.error(f"Traces folder {args.traces} does not exist")
@@ -102,29 +137,36 @@ def main():
             logger.warning("No unsolved tasks found in traces folder")
             return 0
 
-    logger.info(f"Running recovery on {len(task_ids)} task(s) with {args.model}")
+    logger.info(f"Running recovery on {len(task_ids)} task(s) with {model}")
 
     # Generate job name if not specified
     if args.job_name:
         job_name = args.job_name
     else:
-        model_short = args.model.split("/")[-1]
+        model_short = model.split("/")[-1]
         traces_short = traces_path.name
         job_name = f"recovery-{model_short}-on-{traces_short}"
 
-    # Parse agent kwargs
-    agent_kwargs = None
+    # Parse agent kwargs from CLI (merges with config)
+    agent_kwargs = {"model_kwargs": model_kwargs} if model_kwargs else None
     if args.agent_kwargs:
-        import json
         try:
-            agent_kwargs = json.loads(args.agent_kwargs)
+            cli_kwargs = json.loads(args.agent_kwargs)
+            if agent_kwargs:
+                # Merge CLI kwargs with config (CLI overrides)
+                if "model_kwargs" in cli_kwargs:
+                    agent_kwargs["model_kwargs"].update(cli_kwargs["model_kwargs"])
+                    del cli_kwargs["model_kwargs"]
+                agent_kwargs.update(cli_kwargs)
+            else:
+                agent_kwargs = cli_kwargs
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON for --agent-kwargs: {e}")
             return 1
 
     return run_recovery(
         traces_folder=args.traces,
-        model=args.model,
+        model=model,
         task_ids=task_ids,
         job_name=job_name,
         agent=args.agent,
