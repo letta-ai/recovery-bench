@@ -356,8 +356,7 @@ Set is_task_complete to true when you believe the task is finished.
                 response = await litellm.acompletion(
                     model=self._model_name,
                     messages=self._messages,
-                    temperature=self._model_kwargs.get("temperature", 0.7),
-                    **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
+                    **self._model_kwargs,
                 )
                 assistant_content = response.choices[0].message.content
                 if response.usage:
@@ -487,8 +486,7 @@ class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
             response = litellm.completion(
                 model=self._model_name,
                 messages=summary_messages,
-                temperature=0.3,  # Lower temp for summarization
-                **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
+                **self._model_kwargs,
             )
             summary = response.choices[0].message.content
             if response.usage:
