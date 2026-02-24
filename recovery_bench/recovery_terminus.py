@@ -151,14 +151,16 @@ Set is_task_complete to true when you believe the task is finished.
         self._add_trajectory_step("user", recovery_prompt)
         
         # Run the agent loop
-        await self._run_agent_loop(
-            recovery_prompt,
-            environment,
-            context,
-        )
-        
-        # Save trajectory
-        self._save_trajectory()
+        try:
+            await self._run_agent_loop(
+                recovery_prompt,
+                environment,
+                context,
+            )
+        finally:
+            # Always save trajectory and usage, even on timeout
+            self._save_trajectory()
+            self._save_usage()
 
     def _add_trajectory_step(self, source: str, message: str, tool_calls: list = None) -> None:
         """Add a step to the trajectory."""
@@ -183,12 +185,6 @@ Set is_task_complete to true when you believe the task is finished.
                 "model_name": self._model_name,
             },
             "steps": self._trajectory_steps,
-            "usage": {
-                "prompt_tokens": self._total_prompt_tokens,
-                "completion_tokens": self._total_completion_tokens,
-                "total_tokens": self._total_prompt_tokens + self._total_completion_tokens,
-                "cost_usd": round(self._total_cost, 6),
-            },
         }
         
         # Use logs_dir passed to agent (not container path)
@@ -204,6 +200,28 @@ Set is_task_complete to true when you believe the task is finished.
             logger.info(f"Trajectory saved to {trajectory_path}")
         except Exception as e:
             logger.error(f"Failed to save trajectory: {e}")
+
+    def _save_usage(self) -> None:
+        """Save usage stats to a separate JSON file."""
+        usage = {
+            "prompt_tokens": self._total_prompt_tokens,
+            "completion_tokens": self._total_completion_tokens,
+            "total_tokens": self._total_prompt_tokens + self._total_completion_tokens,
+            "cost_usd": round(self._total_cost, 6),
+        }
+
+        if self.logs_dir:
+            usage_path = Path(self.logs_dir).parent / "usage.json"
+        else:
+            usage_path = Path("usage.json")
+
+        try:
+            usage_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(usage_path, "w") as f:
+                json.dump(usage, f, indent=2)
+            logger.info(f"Usage saved to {usage_path}")
+        except Exception as e:
+            logger.error(f"Failed to save usage: {e}")
 
     def _add_messages(self, messages: list[dict]) -> None:
         """Add messages to the conversation history."""
@@ -356,8 +374,7 @@ Set is_task_complete to true when you believe the task is finished.
                 response = await litellm.acompletion(
                     model=self._model_name,
                     messages=self._messages,
-                    temperature=self._model_kwargs.get("temperature", 0.7),
-                    **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
+                    **self._model_kwargs,
                 )
                 assistant_content = response.choices[0].message.content
                 if response.usage:
@@ -487,8 +504,7 @@ class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
             response = litellm.completion(
                 model=self._model_name,
                 messages=summary_messages,
-                temperature=0.3,  # Lower temp for summarization
-                **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
+                **self._model_kwargs,
             )
             summary = response.choices[0].message.content
             if response.usage:
