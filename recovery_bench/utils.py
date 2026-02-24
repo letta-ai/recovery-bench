@@ -285,7 +285,7 @@ def aggregate_usage(job_dir: str) -> dict:
     for task_dir in sorted(job_path.iterdir()):
         if not task_dir.is_dir():
             continue
-        usage_file = task_dir / "agent" / "usage.json"
+        usage_file = task_dir / "usage.json"
         if not usage_file.exists():
             continue
         try:

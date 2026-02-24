@@ -211,7 +211,7 @@ Set is_task_complete to true when you believe the task is finished.
         }
 
         if self.logs_dir:
-            usage_path = Path(self.logs_dir) / "usage.json"
+            usage_path = Path(self.logs_dir).parent / "usage.json"
         else:
             usage_path = Path("usage.json")
 
