@@ -277,7 +277,7 @@ def run_recovery(
 
 
 def aggregate_usage(job_dir: str) -> dict:
-    """Aggregate usage stats from trajectory.json files across a job directory."""
+    """Aggregate usage stats from per-task usage.json files across a job directory."""
     job_path = Path(job_dir)
     totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
     task_count = 0
@@ -285,16 +285,12 @@ def aggregate_usage(job_dir: str) -> dict:
     for task_dir in sorted(job_path.iterdir()):
         if not task_dir.is_dir():
             continue
-        trajectory_file = task_dir / "agent" / "trajectory.json"
-        if not trajectory_file.exists():
-            trajectory_file = task_dir / "trajectory.json"
-        if not trajectory_file.exists():
+        usage_file = task_dir / "agent" / "usage.json"
+        if not usage_file.exists():
             continue
         try:
-            with open(trajectory_file) as f:
-                usage = json.load(f).get("usage")
-            if not usage:
-                continue
+            with open(usage_file) as f:
+                usage = json.load(f)
             totals["prompt_tokens"] += usage.get("prompt_tokens", 0)
             totals["completion_tokens"] += usage.get("completion_tokens", 0)
             totals["total_tokens"] += usage.get("total_tokens", 0)
