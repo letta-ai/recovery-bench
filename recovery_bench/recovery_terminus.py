@@ -15,7 +15,7 @@ from pathlib import Path
 import os
 import json
 import logging
-from typing import Optional
+
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ import re
 import litellm
 
 # Import from utils
-from recovery_bench.utils import create_task_hash
+
 
 
 class Command:
@@ -106,7 +106,7 @@ Set is_task_complete to true when you believe the task is finished.
         await self._session.start()
 
         # Read and replay trajectories during setup (not counted against agent timeout)
-        commands, messages, n_episodes = self._read_trajectories_by_task_name()
+        commands, messages, n_episodes = self._read_trajectories()
 
         if commands:
             self._last_replay_output = await self._replay_environment_async(environment, commands)
@@ -224,48 +224,25 @@ Set is_task_complete to true when you believe the task is finished.
         else:
             self._messages = [{"role": "system", "content": self._system_prompt}]
 
-    def _find_trajectory_folder(self, task_hash: str) -> Optional[Path]:
-        """Find the trajectory folder based on task hash prefix."""
-        base_path = Path(self._base_folder)
-        
-        if not base_path.exists():
-            logger.warning(f"Trajectory folder not found: {base_path}")
-            return None
-
-        # Look for hash-prefixed directories (format: <hash>-<task-id>/)
-        for item in base_path.iterdir():
-            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
-                # Check agent/ subdirectory (Harbor output structure)
-                trajectory_file = item / "agent" / "trajectory.json"
-                if trajectory_file.exists():
-                    logger.debug(f"Found trajectory for hash {task_hash}: {item}")
-                    return item
-                # Fall back to direct path
-                trajectory_file = item / "trajectory.json"
-                if trajectory_file.exists():
-                    logger.debug(f"Found trajectory for hash {task_hash}: {item}")
-                    return item
-
-        logger.warning(f"No trajectory found for hash {task_hash} in {base_path}")
-        return None
-
-    def _get_task_name_from_logs_dir(self) -> str | None:
+    def _get_task_name(self) -> str | None:
         """Extract task name from logs_dir path.
         
         logs_dir is like: .../job-name/task-name__suffix/agent
-        Traces dir has:   .../hash-task-name__suffix/
         """
         if not self.logs_dir:
             return None
-        # Go up from agent/ to task dir, get its name
         task_dir_name = Path(self.logs_dir).parent.name
-        # Strip the __suffix (random trial ID)
         if "__" in task_dir_name:
             return task_dir_name.rsplit("__", 1)[0]
         return task_dir_name
 
-    def _find_trajectory_folder_by_task_name(self, task_name: str) -> Path | None:
-        """Find trajectory folder by matching task name."""
+    def _find_trajectory_folder(self) -> Path | None:
+        """Find the trajectory folder for this task in the traces directory."""
+        task_name = self._get_task_name()
+        if not task_name:
+            logger.warning("Could not extract task name from logs_dir")
+            return None
+
         base_path = Path(self._base_folder)
         if not base_path.exists():
             logger.warning(f"Trajectory folder not found: {base_path}")
@@ -286,7 +263,6 @@ Set is_task_complete to true when you believe the task is finished.
                 dir_task = dir_task.rsplit("__", 1)[0]
             
             if dir_task == task_name:
-                # Verify it has a trajectory file
                 for traj_path in [item / "agent" / "trajectory.json", item / "trajectory.json"]:
                     if traj_path.exists():
                         logger.debug(f"Found trajectory for task {task_name}: {item}")
@@ -295,35 +271,14 @@ Set is_task_complete to true when you believe the task is finished.
         logger.warning(f"No trajectory found for task {task_name} in {base_path}")
         return None
 
-    def _read_trajectories_by_task_name(self) -> tuple[list[Command], list[dict], int]:
-        """Read commands and messages by matching task name from logs_dir."""
-        task_name = self._get_task_name_from_logs_dir()
-        if not task_name:
-            logger.warning("Could not extract task name from logs_dir")
-            return [], [], 0
-        
-        logger.debug(f"Looking for trajectory for task: {task_name}")
-        trajectory_folder = self._find_trajectory_folder_by_task_name(task_name)
-
+    def _read_trajectories(self) -> tuple[list[Command], list[dict], int]:
+        """Read commands and messages from the previous trajectory."""
+        trajectory_folder = self._find_trajectory_folder()
         if trajectory_folder is None:
             return [], [], 0
+        return self._parse_trajectory(trajectory_folder)
 
-        return self._parse_trajectory_folder(trajectory_folder)
-
-    def _read_trajectories(
-        self, task_description: str
-    ) -> tuple[list[Command], list[dict], int]:
-        """Read commands and messages from ATIF trajectory file (by instruction hash)."""
-        task_hash = create_task_hash(task_description)
-        logger.debug(f"Looking for trajectory with hash: {task_hash}")
-        trajectory_folder = self._find_trajectory_folder(task_hash)
-
-        if trajectory_folder is None:
-            return [], [], 0
-
-        return self._parse_trajectory_folder(trajectory_folder)
-
-    def _parse_trajectory_folder(
+    def _parse_trajectory(
         self, trajectory_folder: Path
     ) -> tuple[list[Command], list[dict], int]:
         """Parse commands and messages from a trajectory folder."""
