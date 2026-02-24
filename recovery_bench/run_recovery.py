@@ -82,13 +82,6 @@ def main():
         default=8,
         help="Number of concurrent processes",
     )
-    parser.add_argument(
-        "--agent-kwargs",
-        type=str,
-        default=None,
-        help="JSON string of kwargs to pass to agent (e.g., '{\"model_kwargs\": {\"reasoning_effort\": \"high\"}}')",
-    )
-
     args = parser.parse_args()
 
     # Load model config if provided
@@ -147,22 +140,8 @@ def main():
         traces_short = traces_path.name
         job_name = f"recovery-{model_short}-on-{traces_short}"
 
-    # Parse agent kwargs from CLI (merges with config)
+    # Build agent kwargs from config
     agent_kwargs = {"model_kwargs": model_kwargs} if model_kwargs else None
-    if args.agent_kwargs:
-        try:
-            cli_kwargs = json.loads(args.agent_kwargs)
-            if agent_kwargs:
-                # Merge CLI kwargs with config (CLI overrides)
-                if "model_kwargs" in cli_kwargs:
-                    agent_kwargs["model_kwargs"].update(cli_kwargs["model_kwargs"])
-                    del cli_kwargs["model_kwargs"]
-                agent_kwargs.update(cli_kwargs)
-            else:
-                agent_kwargs = cli_kwargs
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON for --agent-kwargs: {e}")
-            return 1
 
     return run_recovery(
         traces_folder=args.traces,
