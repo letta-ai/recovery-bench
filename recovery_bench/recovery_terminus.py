@@ -151,15 +151,16 @@ Set is_task_complete to true when you believe the task is finished.
         self._add_trajectory_step("user", recovery_prompt)
         
         # Run the agent loop
-        await self._run_agent_loop(
-            recovery_prompt,
-            environment,
-            context,
-        )
-        
-        # Save trajectory and usage
-        self._save_trajectory()
-        self._save_usage()
+        try:
+            await self._run_agent_loop(
+                recovery_prompt,
+                environment,
+                context,
+            )
+        finally:
+            # Always save trajectory and usage, even on timeout
+            self._save_trajectory()
+            self._save_usage()
 
     def _add_trajectory_step(self, source: str, message: str, tool_calls: list = None) -> None:
         """Add a step to the trajectory."""
