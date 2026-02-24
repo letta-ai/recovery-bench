@@ -239,6 +239,7 @@ def run_recovery(
     job_name: str | None = None,
     agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
     n_concurrent: int = 4,
+    model_kwargs: dict | None = None,
 ):
     """Run recovery agent on initial traces using harbor."""
     env = os.environ.copy()
@@ -255,6 +256,10 @@ def run_recovery(
 
     if job_name:
         cmd.extend(["--job-name", job_name])
+    
+    if model_kwargs:
+        import json as json_module
+        cmd.extend(["--agent-kwargs", json_module.dumps({"model_kwargs": model_kwargs})])
 
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
