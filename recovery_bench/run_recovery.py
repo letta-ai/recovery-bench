@@ -6,26 +6,27 @@ Use this to evaluate different models' recovery capabilities on the same
 set of failed initial traces.
 
 Usage:
-    python -m recovery_bench.run_recovery --traces jobs/initial-xxx --model anthropic/claude-opus-4-5-20251101
-
-Examples:
-    # Recover with opus on haiku's failed traces
+    # Using a model config file
     python -m recovery_bench.run_recovery \
-        --traces jobs/initial-claude-haiku-4-5-20251001-20260202 \
-        --model anthropic/claude-opus-4-5-20251101
+        --traces jobs/initial-claude-haiku-4-5-20251001-20260219_234042 \
+        --model-config configs/models/opus-4.6-high.json
+
+    # Using a model name directly
+    python -m recovery_bench.run_recovery \
+        --traces jobs/initial-claude-haiku-4-5-20251001-20260219_234042 \
+        --model anthropic/claude-opus-4-6
 
     # Use LettaCode recovery agent instead of terminus
     python -m recovery_bench.run_recovery \
         --traces jobs/initial-xxx \
-        --model anthropic/claude-opus-4-5-20251101 \
-        --agent recovery_bench.replay_letta_code:ReplayLettaCode
+        --model-config configs/models/opus-4.6-high.json \
+        --agent recovery_bench.recovery_letta_code:RecoveryLettaCode
 """
 
 import argparse
+import json
 import logging
 import sys
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 
 from .utils import (
@@ -33,6 +34,8 @@ from .utils import (
     reorganize_directories,
     run_recovery,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -85,10 +88,7 @@ def main():
     args = parser.parse_args()
 
     # Load model config if provided
-    import json
-    model = args.model
     model_kwargs = {}
-    
     if args.model_config:
         config_path = Path(args.model_config)
         if not config_path.exists():
@@ -97,18 +97,15 @@ def main():
         try:
             with open(config_path) as f:
                 config = json.load(f)
-            model = config.get("model", model)
             model_kwargs = config.get("model_kwargs", {})
             logger.info(f"Loaded model config from {args.model_config}")
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in model config: {e}")
             return 1
 
-    # CLI --model overrides config
-    if args.model:
-        model = args.model
+    # --model flag takes priority, then config file
+    model = args.model or config.get("model") if args.model_config else args.model
 
-    # Validate model is provided
     if not model:
         logger.error("Model must be specified via --model or --model-config")
         return 1
