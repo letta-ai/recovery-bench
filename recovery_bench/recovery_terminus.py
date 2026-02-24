@@ -384,24 +384,34 @@ Set is_task_complete to true when you believe the task is finished.
         self._messages.append({"role": "user", "content": initial_prompt})
         
         for episode in range(self._max_episodes):
-            # Call LLM
-            try:
-                response = await litellm.acompletion(
-                    model=self._model_name,
-                    messages=self._messages,
-                    **self._model_kwargs,
-                )
-                assistant_content = response.choices[0].message.content
-                if response.usage:
-                    self._total_prompt_tokens += response.usage.prompt_tokens
-                    self._total_completion_tokens += response.usage.completion_tokens
+            # Call LLM with retry on transient errors
+            response = None
+            for attempt in range(3):
                 try:
-                    self._total_cost += litellm.completion_cost(response)
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.error(f"LLM error: {e}")
+                    response = await litellm.acompletion(
+                        model=self._model_name,
+                        messages=self._messages,
+                        timeout=1200,  # 20min to handle long reasoning
+                        **self._model_kwargs,
+                    )
+                    break
+                except Exception as e:
+                    logger.error(f"LLM error (attempt {attempt + 1}/3): {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(5 * (attempt + 1))
+
+            if response is None:
+                logger.error("LLM failed after 3 attempts, stopping")
                 break
+
+            assistant_content = response.choices[0].message.content
+            if response.usage:
+                self._total_prompt_tokens += response.usage.prompt_tokens
+                self._total_completion_tokens += response.usage.completion_tokens
+            try:
+                self._total_cost += litellm.completion_cost(response)
+            except Exception:
+                pass
 
             # Add assistant response to messages
             self._messages.append({"role": "assistant", "content": assistant_content})
