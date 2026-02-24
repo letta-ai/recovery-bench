@@ -134,9 +134,13 @@ def main():
     if args.job_name:
         job_name = args.job_name
     else:
-        model_short = model.split("/")[-1]
+        # Use config filename (e.g., "opus-4.6-max") if available, otherwise model name
+        if args.model_config:
+            config_name = Path(args.model_config).stem
+        else:
+            config_name = model.split("/")[-1]
         traces_short = traces_path.name
-        job_name = f"recovery-{model_short}-on-{traces_short}"
+        job_name = f"recovery-{config_name}-on-{traces_short}"
 
     result = run_recovery(
         traces_folder=args.traces,

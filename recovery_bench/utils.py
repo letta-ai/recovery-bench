@@ -259,7 +259,7 @@ def run_recovery(
     
     if model_kwargs:
         import json as json_module
-        cmd.extend(["--agent-kwargs", json_module.dumps({"model_kwargs": model_kwargs})])
+        cmd.extend(["--agent-kwarg", f"model_kwargs={json_module.dumps(model_kwargs)}"])
 
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
