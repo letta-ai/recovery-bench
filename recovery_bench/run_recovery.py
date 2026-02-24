@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 from .utils import (
+    aggregate_usage,
     get_unsolved_tasks,
     reorganize_directories,
     run_recovery,
@@ -137,7 +138,7 @@ def main():
         traces_short = traces_path.name
         job_name = f"recovery-{model_short}-on-{traces_short}"
 
-    return run_recovery(
+    result = run_recovery(
         traces_folder=args.traces,
         model=model,
         task_ids=task_ids,
@@ -146,6 +147,20 @@ def main():
         n_concurrent=args.n_concurrent,
         model_kwargs=model_kwargs,
     )
+
+    # Aggregate and log usage across all tasks
+    job_dir = Path("jobs") / job_name
+    if job_dir.exists():
+        usage = aggregate_usage(str(job_dir))
+        if usage["tasks_with_usage"] > 0:
+            logger.info(
+                f"Total usage: {usage['total_tokens']} tokens "
+                f"({usage['prompt_tokens']} prompt + {usage['completion_tokens']} completion), "
+                f"cost: ${usage['cost_usd']:.4f} "
+                f"across {usage['tasks_with_usage']} task(s)"
+            )
+
+    return result
 
 
 if __name__ == "__main__":

@@ -59,6 +59,9 @@ class RecoveryTerminus(BaseAgent):
         self._model_kwargs = model_kwargs or {}  # Extra params like reasoning_effort, temperature
         self._max_episodes = 50
         self._messages: list[dict] = []
+        self._total_prompt_tokens = 0
+        self._total_completion_tokens = 0
+        self._total_cost = 0.0
         self._session: TmuxSession | None = None
         self._trajectory_steps: list[dict] = []
         self._step_counter = 0
@@ -180,6 +183,12 @@ Set is_task_complete to true when you believe the task is finished.
                 "model_name": self._model_name,
             },
             "steps": self._trajectory_steps,
+            "usage": {
+                "prompt_tokens": self._total_prompt_tokens,
+                "completion_tokens": self._total_completion_tokens,
+                "total_tokens": self._total_prompt_tokens + self._total_completion_tokens,
+                "cost_usd": round(self._total_cost, 6),
+            },
         }
         
         # Use logs_dir passed to agent (not container path)
@@ -351,6 +360,13 @@ Set is_task_complete to true when you believe the task is finished.
                     **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
                 )
                 assistant_content = response.choices[0].message.content
+                if response.usage:
+                    self._total_prompt_tokens += response.usage.prompt_tokens
+                    self._total_completion_tokens += response.usage.completion_tokens
+                try:
+                    self._total_cost += litellm.completion_cost(response)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"LLM error: {e}")
                 break
@@ -475,6 +491,13 @@ class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
                 **{k: v for k, v in self._model_kwargs.items() if k != "temperature"},
             )
             summary = response.choices[0].message.content
+            if response.usage:
+                self._total_prompt_tokens += response.usage.prompt_tokens
+                self._total_completion_tokens += response.usage.completion_tokens
+            try:
+                self._total_cost += litellm.completion_cost(response)
+            except Exception:
+                pass
         except Exception:
             summary = "Previous attempts to complete this task failed."
 

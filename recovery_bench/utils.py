@@ -274,3 +274,45 @@ def run_recovery(
     except Exception as e:
         logger.error(f"Error: {e}")
         return 1
+
+
+def aggregate_usage(job_dir: str) -> dict:
+    """Aggregate usage stats from trajectory.json files across a job directory."""
+    job_path = Path(job_dir)
+    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+    task_count = 0
+
+    for task_dir in sorted(job_path.iterdir()):
+        if not task_dir.is_dir():
+            continue
+        trajectory_file = task_dir / "agent" / "trajectory.json"
+        if not trajectory_file.exists():
+            trajectory_file = task_dir / "trajectory.json"
+        if not trajectory_file.exists():
+            continue
+        try:
+            with open(trajectory_file) as f:
+                usage = json.load(f).get("usage")
+            if not usage:
+                continue
+            totals["prompt_tokens"] += usage.get("prompt_tokens", 0)
+            totals["completion_tokens"] += usage.get("completion_tokens", 0)
+            totals["total_tokens"] += usage.get("total_tokens", 0)
+            totals["cost_usd"] += usage.get("cost_usd", 0.0)
+            task_count += 1
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    totals["cost_usd"] = round(totals["cost_usd"], 6)
+    totals["tasks_with_usage"] = task_count
+
+    # Save to job directory
+    usage_file = job_path / "usage.json"
+    try:
+        with open(usage_file, "w") as f:
+            json.dump(totals, f, indent=2)
+        logger.info(f"Usage saved to {usage_file}")
+    except Exception as e:
+        logger.error(f"Failed to save usage: {e}")
+
+    return totals
