@@ -140,9 +140,6 @@ def main():
         traces_short = traces_path.name
         job_name = f"recovery-{model_short}-on-{traces_short}"
 
-    # Build agent kwargs from config
-    agent_kwargs = {"model_kwargs": model_kwargs} if model_kwargs else None
-
     return run_recovery(
         traces_folder=args.traces,
         model=model,
@@ -150,7 +147,7 @@ def main():
         job_name=job_name,
         agent=args.agent,
         n_concurrent=args.n_concurrent,
-        agent_kwargs=agent_kwargs,
+        model_kwargs=model_kwargs,
     )
 
 
