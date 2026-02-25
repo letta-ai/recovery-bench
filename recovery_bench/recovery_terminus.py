@@ -43,18 +43,9 @@ class RecoveryTerminus(Terminus2):
     """
 
     def __init__(self, model_kwargs: dict = None, **kwargs):
-        # Extract params from model_kwargs that Terminus2 accepts directly
-        model_kwargs = model_kwargs or {}
-        reasoning_effort = model_kwargs.pop("reasoning_effort", None)
-        temperature = model_kwargs.pop("temperature", None)
-
-        init_kwargs = {**kwargs}
-        if reasoning_effort:
-            init_kwargs["reasoning_effort"] = reasoning_effort
-        if temperature is not None:
-            init_kwargs["temperature"] = temperature
-
-        super().__init__(**init_kwargs)
+        # model_kwargs from config files (e.g. reasoning_effort, temperature)
+        # are forwarded as direct params to Terminus2
+        super().__init__(**(model_kwargs or {}), **kwargs)
 
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
