@@ -1,115 +1,72 @@
 """
-ReplayAgent for Harbor/Terminal-Bench 2.0
+RecoveryTerminus - Extends Harbor's Terminus2 with trajectory replay for recovery.
 
-This module provides the ReplayAgent for recovery-bench. The agent reads
-previous failed trajectories, replays commands to restore the environment
-state, and then continues with fresh attempts to complete the task.
+This agent reads previous failed trajectories, replays commands to restore
+the environment state during setup(), then runs Terminus2's agent loop
+with a recovery-oriented prompt.
 
 Variants:
-- ReplayAgent: Full message history recovery
-- ReplayAgentWithoutMessages: Environment-only recovery  
-- ReplayAgentWithMessageSummaries: Summarized history recovery
+- RecoveryTerminus: Full message history recovery
+- RecoveryTerminusWithoutMessages: Environment-only recovery
+- RecoveryTerminusWithMessageSummaries: Summarized history recovery
 """
 
-from pathlib import Path
-import os
+import asyncio
 import json
 import logging
+import os
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
-import asyncio
+from harbor.agents.terminus_2.terminus_2 import Terminus2
+from harbor.environments.base import BaseEnvironment
+from harbor.llms.chat import Chat
+from harbor.models.agent.context import AgentContext
+from harbor.models.trajectories import Step
 
 logger = logging.getLogger(__name__)
 
-# Harbor imports
-from harbor import BaseAgent, BaseEnvironment, AgentContext
-from harbor.agents.terminus_2.tmux_session import TmuxSession
-from harbor.models.trial.paths import EnvironmentPaths
-from datetime import datetime, timezone
-import re
 
-# LiteLLM for LLM calls
-import litellm
-
-# Import from utils
+@dataclass
+class ReplayCommand:
+    """A command extracted from a previous trajectory for replay."""
+    keystrokes: str
+    timeout_sec: float = 15.0
 
 
-
-class Command:
-    """Represents a terminal command to execute."""
-    def __init__(self, keystrokes: str, is_blocking: bool = True, timeout_sec: int = 120):
-        self.keystrokes = keystrokes
-        self.is_blocking = is_blocking
-        self.timeout_sec = timeout_sec
-
-
-class RecoveryTerminus(BaseAgent):
+class RecoveryTerminus(Terminus2):
     """
-    Replay agent that recovers from failed trajectories.
-    
-    This agent reads a previous failed trajectory, replays all commands to
-    restore the environment state, and then continues with the full message
-    history, prompting the model to try a different approach.
+    Terminus2 agent extended with trajectory replay for recovery.
+
+    During setup(), reads a previous failed trajectory, replays all commands
+    to restore the corrupted environment state. During run(), injects prior
+    messages and runs Terminus2's agent loop with a recovery prompt.
     """
 
-    def __init__(self, logs_dir=None, model_name: str = "anthropic/claude-sonnet-4-20250514", model_kwargs: dict = None, **kwargs):
-        super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
+    def __init__(self, model_kwargs: dict = None, **kwargs):
+        # model_kwargs from config files (e.g. reasoning_effort, temperature)
+        # are forwarded as direct params to Terminus2
+        super().__init__(**(model_kwargs or {}), **kwargs)
+
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
-        self._model_name = model_name
-        self._model_kwargs = model_kwargs or {}  # Extra params like reasoning_effort, temperature
-        self._max_episodes = 50
-        self._messages: list[dict] = []
-        self._total_prompt_tokens = 0
-        self._total_completion_tokens = 0
-        self._total_cost = 0.0
-        self._session: TmuxSession | None = None
-        self._trajectory_steps: list[dict] = []
-        self._step_counter = 0
-        
-        # System prompt for the recovery agent
-        self._system_prompt = """You are an AI assistant tasked with completing terminal-based tasks.
-You have access to a terminal session where you can execute commands.
-
-When given a task:
-1. Analyze the current terminal state
-2. Plan your approach
-3. Execute commands one at a time
-4. Check the results before proceeding
-
-Respond with a JSON object containing:
-{
-    "analysis": "Your analysis of the current state",
-    "plan": "Your plan for the next steps", 
-    "commands": [{"keystrokes": "command to run", "is_blocking": true, "timeout_sec": 120}],
-    "is_task_complete": false
-}
-
-Set is_task_complete to true when you believe the task is finished.
-"""
+        self._last_replay_output = ""
+        self._replay_messages: list[dict] = []
 
     @staticmethod
     def name() -> str:
         return "recovery-terminus"
 
-    def version(self) -> str | None:
-        return "2.0.0"
-
     async def setup(self, environment: BaseEnvironment) -> None:
-        """Setup the agent: start tmux, read trajectories, and replay commands."""
-        self._session = TmuxSession(
-            session_name=self.name(),
-            environment=environment,
-            logging_path=EnvironmentPaths.agent_dir / "replay_agent.pane",
-            local_asciinema_recording_path=None,
-            remote_asciinema_recording_path=None,
-        )
-        await self._session.start()
+        """Setup: start tmux (via Terminus2), then read and replay trajectories."""
+        await super().setup(environment)
 
         # Read and replay trajectories during setup (not counted against agent timeout)
         commands, messages, n_episodes = self._read_trajectories()
 
         if commands:
-            self._last_replay_output = await self._replay_environment_async(environment, commands)
+            self._last_replay_output = await self._replay_commands(commands)
             logger.info(f"Replayed {len(commands)} commands from previous trajectory")
         else:
             logger.info("No commands found in trajectory, starting fresh")
@@ -123,84 +80,89 @@ Set is_task_complete to true when you believe the task is finished.
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        """Run the recovery agent loop."""
-        # Set up messages from replayed trajectory
-        self._add_messages(self._replay_messages)
+        """Build a recovery prompt and run Terminus2's agent loop."""
+        self._chat = Chat(self._llm, interleaved_thinking=self._interleaved_thinking)
+        self._context = context
 
-        # Create the recovery prompt
-        if self._include_messages:
-            recovery_prompt = (
-                f"Current terminal state:\n{self._last_replay_output}\n\n"
-                "Previous attempts failed! Please try again with different approaches."
+        if self._session is None:
+            raise RuntimeError("Session is not set")
+
+        # Inject prior conversation messages into chat history
+        if self._include_messages and self._replay_messages:
+            for msg in self._replay_messages:
+                self._chat._messages.append(msg)
+
+        # Build recovery prompt using terminus2's template format
+        terminal_state = self._limit_output_length(self._last_replay_output)
+
+        recovery_instruction = (
+            f"{instruction}\n\n"
+            "RECOVERY MODE: Previous attempt(s) to complete this task failed. "
+            "The environment has been restored to the state after the failed attempt. "
+            "Please analyze what went wrong and try a DIFFERENT approach."
+        )
+
+        initial_prompt = self._prompt_template.format(
+            instruction=recovery_instruction,
+            terminal_state=terminal_state,
+        )
+
+        self._trajectory_steps.append(
+            Step(
+                step_id=1,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                source="user",
+                message=initial_prompt,
             )
-        else:
-            recovery_prompt = (
-                f"Task: {instruction}\n\n"
-                f"Current terminal state:\n{self._last_replay_output}\n\n"
-                "Previous attempts failed! Please try again with different approaches."
-            )
+        )
 
-        # Record initial user message
-        self._add_trajectory_step("user", recovery_prompt)
-
-        # Run the agent loop
+        actual_episodes = self._n_episodes
         try:
-            await self._run_agent_loop(
-                recovery_prompt,
-                environment,
-                context,
+            actual_episodes = await self._run_agent_loop(
+                initial_prompt=initial_prompt,
+                chat=self._chat,
+                logging_dir=self.logs_dir,
+                original_instruction=instruction,
             )
         finally:
-            # Always save trajectory and usage, even on timeout
-            self._save_trajectory()
-            self._save_usage()
+            # Populate context with metrics (same as Terminus2.run())
+            context.rollout_details = (
+                self._chat.rollout_details + self._subagent_rollout_details
+            )
+            context.n_input_tokens = (
+                self._chat.total_input_tokens
+                + self._subagent_metrics.total_prompt_tokens
+            )
+            context.n_output_tokens = (
+                self._chat.total_output_tokens
+                + self._subagent_metrics.total_completion_tokens
+            )
+            context.n_cache_tokens = (
+                self._chat.total_cache_tokens
+                + self._subagent_metrics.total_cached_tokens
+            )
+            total_cost = self._chat.total_cost + self._subagent_metrics.total_cost_usd
+            context.cost_usd = total_cost if total_cost > 0 else None
+            context.metadata = {
+                "n_episodes": actual_episodes,
+                "api_request_times_msec": self._api_request_times,
+                "summarization_count": self._summarization_count,
+            }
+            if self._store_all_messages:
+                context.metadata["all_messages"] = self._chat.messages
 
-    def _add_trajectory_step(self, source: str, message: str, tool_calls: list = None) -> None:
-        """Add a step to the trajectory."""
-        self._step_counter += 1
-        step = {
-            "step_id": self._step_counter,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "source": source,
-            "message": message,
-        }
-        if tool_calls:
-            step["tool_calls"] = tool_calls
-        self._trajectory_steps.append(step)
-    
-    def _save_trajectory(self) -> None:
-        """Save trajectory to ATIF format JSON file."""
-        trajectory = {
-            "schema_version": "ATIF-v1.5",
-            "agent": {
-                "name": self.name(),
-                "version": self.version(),
-                "model_name": self._model_name,
-            },
-            "steps": self._trajectory_steps,
-        }
-        
-        # Use logs_dir passed to agent (not container path)
-        if self.logs_dir:
-            trajectory_path = Path(self.logs_dir) / "trajectory.json"
-        else:
-            trajectory_path = Path("trajectory.json")
-            
-        try:
-            trajectory_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(trajectory_path, "w") as f:
-                json.dump(trajectory, f, indent=2)
-            logger.info(f"Trajectory saved to {trajectory_path}")
-        except Exception as e:
-            logger.error(f"Failed to save trajectory: {e}")
+            self._dump_trajectory()
 
-    def _save_usage(self) -> None:
-        """Save usage stats to a separate JSON file."""
+            # Also save usage.json for easy aggregation
+            self._save_usage(context)
+
+    def _save_usage(self, context: AgentContext) -> None:
+        """Save usage stats to a separate JSON file in the task dir."""
         usage = {
-            "prompt_tokens": self._total_prompt_tokens,
-            "completion_tokens": self._total_completion_tokens,
-            "total_tokens": self._total_prompt_tokens + self._total_completion_tokens,
-            "cost_usd": round(self._total_cost, 6),
+            "prompt_tokens": context.n_input_tokens or 0,
+            "completion_tokens": context.n_output_tokens or 0,
+            "total_tokens": (context.n_input_tokens or 0) + (context.n_output_tokens or 0),
+            "cost_usd": round(context.cost_usd or 0, 6),
         }
 
         if self.logs_dir:
@@ -216,17 +178,11 @@ Set is_task_complete to true when you believe the task is finished.
         except Exception as e:
             logger.error(f"Failed to save usage: {e}")
 
-    def _add_messages(self, messages: list[dict]) -> None:
-        """Add messages to the conversation history."""
-        if self._include_messages:
-            self._messages = [{"role": "system", "content": self._system_prompt}]
-            self._messages.extend(messages)
-        else:
-            self._messages = [{"role": "system", "content": self._system_prompt}]
+    # ===== Trajectory replay helpers =====
 
     def _get_task_name(self) -> str | None:
         """Extract task name from logs_dir path.
-        
+
         logs_dir is like: .../job-name/task-name__suffix/agent
         """
         if not self.logs_dir:
@@ -261,7 +217,7 @@ Set is_task_complete to true when you believe the task is finished.
             # Strip __suffix
             if "__" in dir_task:
                 dir_task = dir_task.rsplit("__", 1)[0]
-            
+
             if dir_task == task_name:
                 for traj_path in [item / "agent" / "trajectory.json", item / "trajectory.json"]:
                     if traj_path.exists():
@@ -271,7 +227,7 @@ Set is_task_complete to true when you believe the task is finished.
         logger.warning(f"No trajectory found for task {task_name} in {base_path}")
         return None
 
-    def _read_trajectories(self) -> tuple[list[Command], list[dict], int]:
+    def _read_trajectories(self) -> tuple[list[ReplayCommand], list[dict], int]:
         """Read commands and messages from the previous trajectory."""
         trajectory_folder = self._find_trajectory_folder()
         if trajectory_folder is None:
@@ -280,9 +236,8 @@ Set is_task_complete to true when you believe the task is finished.
 
     def _parse_trajectory(
         self, trajectory_folder: Path
-    ) -> tuple[list[Command], list[dict], int]:
+    ) -> tuple[list[ReplayCommand], list[dict], int]:
         """Parse commands and messages from a trajectory folder."""
-        # Check agent/ subdirectory first (Harbor output structure)
         trajectory_file = trajectory_folder / "agent" / "trajectory.json"
         if not trajectory_file.exists():
             trajectory_file = trajectory_folder / "trajectory.json"
@@ -295,19 +250,17 @@ Set is_task_complete to true when you believe the task is finished.
         except (json.JSONDecodeError, FileNotFoundError):
             return [], [], 0
 
-        commands = []
-        messages = []
+        commands: list[ReplayCommand] = []
+        messages: list[dict] = []
         n_episodes = 0
 
-        # ATIF v1.5 format: steps array with source field
-        steps = trajectory.get("steps", trajectory)  # Fall back to trajectory itself if no steps key
-        
+        steps = trajectory.get("steps", trajectory)
+
         for step in steps:
-            # Handle ATIF v1.5 format (source/message)
             source = step.get("source", step.get("role", ""))
             content = step.get("message", step.get("content", ""))
-            
-            if source == "agent" or source == "assistant":
+
+            if source in ("agent", "assistant"):
                 n_episodes += 1
                 # Extract commands from tool_calls (ATIF v1.5)
                 tool_calls = step.get("tool_calls", [])
@@ -315,165 +268,60 @@ Set is_task_complete to true when you believe the task is finished.
                     args = tool_call.get("arguments", {})
                     keystrokes = args.get("keystrokes", "")
                     if keystrokes:
-                        commands.append(Command(
+                        commands.append(ReplayCommand(
                             keystrokes=keystrokes,
-                            is_blocking=True,
-                            timeout_sec=int(args.get("duration", 1) * 10) + 5  # Convert duration to timeout
+                            timeout_sec=int(args.get("duration", 1) * 10) + 5,
                         ))
-                
-                # Also try parsing message content for commands (old format)
+
+                # Fallback: parse commands from message content (old format)
                 if not tool_calls:
                     try:
                         response = json.loads(content) if isinstance(content, str) else content
                         if isinstance(response, dict) and "commands" in response:
                             for cmd in response["commands"]:
-                                commands.append(Command(
+                                commands.append(ReplayCommand(
                                     keystrokes=cmd.get("keystrokes", ""),
-                                    is_blocking=cmd.get("is_blocking", True),
-                                    timeout_sec=cmd.get("timeout_sec", 120)
+                                    timeout_sec=cmd.get("timeout_sec", 120),
                                 ))
                     except (json.JSONDecodeError, TypeError):
                         pass
-            
-            # Add to messages for context
+
+            # Collect messages for context injection
             role = "assistant" if source == "agent" else source
-            if role in ["user", "assistant", "system"]:
+            if role in ("user", "assistant", "system"):
                 messages.append({"role": role, "content": content})
 
         return commands, messages, n_episodes
 
-    async def _replay_environment_async(
-        self, environment: BaseEnvironment, commands: list[Command]
-    ) -> str:
-        """Replay commands in the environment to restore state using TmuxSession."""
+    async def _replay_commands(self, commands: list[ReplayCommand]) -> str:
+        """Replay commands in the environment to restore state."""
         if not self._session:
             logger.warning("TmuxSession not initialized, cannot replay")
             return ""
-        
+
         for command in commands:
             try:
-                # Use TmuxSession.send_keys like terminus-2 does
                 await self._session.send_keys(
                     keys=command.keystrokes,
                     min_timeout_sec=0.5,
                     max_timeout_sec=float(command.timeout_sec),
                 )
             except asyncio.TimeoutError:
-                # Continue even on timeout
                 continue
             except Exception as e:
                 logger.error(f"Replay error: {e}")
                 continue
 
-        # Get final terminal state
         try:
             last_output = await self._session.capture_pane()
             return last_output or ""
         except Exception:
             return ""
 
-    async def _run_agent_loop(
-        self,
-        initial_prompt: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        """Run the main agent loop for recovery."""
-        
-        # Add initial prompt to messages
-        self._messages.append({"role": "user", "content": initial_prompt})
-        
-        for episode in range(self._max_episodes):
-            # Call LLM
-            try:
-                response = await litellm.acompletion(
-                    model=self._model_name,
-                    messages=self._messages,
-                    **self._model_kwargs,
-                )
-                assistant_content = response.choices[0].message.content
-                if response.usage:
-                    self._total_prompt_tokens += response.usage.prompt_tokens
-                    self._total_completion_tokens += response.usage.completion_tokens
-                try:
-                    self._total_cost += litellm.completion_cost(response)
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.error(f"LLM error: {e}")
-                break
-
-            # Add assistant response to messages
-            self._messages.append({"role": "assistant", "content": assistant_content})
-            
-            # Log the response
-            logger.debug(f"Agent response: {assistant_content[:200]}...")
-            
-            # Record agent step in trajectory
-            self._add_trajectory_step("agent", assistant_content)
-
-            # Parse response
-            try:
-                parsed = json.loads(assistant_content)
-            except json.JSONDecodeError:
-                # Try to extract JSON from response
-                json_match = re.search(r'\{.*\}', assistant_content, re.DOTALL)
-                if json_match:
-                    try:
-                        parsed = json.loads(json_match.group())
-                    except json.JSONDecodeError:
-                        parsed = {"commands": [], "is_task_complete": False}
-                else:
-                    parsed = {"commands": [], "is_task_complete": False}
-
-            # Check if task is complete (handle both key names)
-            if parsed.get("is_task_complete", False) or parsed.get("task_complete", False):
-                logger.info("Agent reported task complete")
-                break
-
-            # Execute commands using TmuxSession
-            commands = parsed.get("commands", [])
-            
-            for cmd_data in commands:
-                keystrokes = cmd_data.get("keystrokes", "")
-                duration = cmd_data.get("duration", cmd_data.get("timeout_sec", 1.0))
-                
-                if keystrokes and self._session:
-                    try:
-                        await self._session.send_keys(
-                            keys=keystrokes,
-                            min_timeout_sec=float(duration),
-                            max_timeout_sec=180.0,
-                        )
-                    except Exception as e:
-                        logger.error(f"Command error: {e}")
-
-            # Get terminal state after commands
-            terminal_output = ""
-            if self._session:
-                try:
-                    terminal_output = await self._session.capture_pane() or ""
-                except Exception:
-                    pass
-
-            # Log terminal output
-            logger.debug(f"Terminal output: {terminal_output[:200] if terminal_output else '(empty)'}...")
-
-            # Add terminal output to messages for next iteration (avoid empty content)
-            observation = terminal_output.strip() if terminal_output.strip() else "(No output)"
-            self._messages.append({"role": "user", "content": observation})
-            
-            # Record observation in trajectory
-            self._add_trajectory_step("user", observation)
-
 
 class RecoveryTerminusWithoutMessages(RecoveryTerminus):
     """
-    Replay agent that only restores environment state.
-    
-    This variant replays commands to restore the environment but does NOT
-    include the previous conversation history. The model sees only the
-    corrupted environment and the original task.
+    Recovery agent that only restores environment state (no message history).
     """
 
     def __init__(self, **kwargs):
@@ -487,11 +335,8 @@ class RecoveryTerminusWithoutMessages(RecoveryTerminus):
 
 class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
     """
-    Replay agent that uses summarized message history.
-    
-    This variant replays commands and provides a summary of the previous
-    conversation instead of the full history. This tests whether a
-    compressed view of history helps recovery.
+    Recovery agent that injects a summarized version of the previous
+    conversation history instead of the full messages.
     """
 
     def __init__(self, **kwargs):
@@ -502,37 +347,29 @@ class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
     def name() -> str:
         return "recovery-terminus-with-summaries"
 
-    def _add_messages(self, messages: list[dict]) -> None:
-        """Create a summary of messages instead of using full history."""
-        if not messages:
-            self._messages = [{"role": "system", "content": self._system_prompt}]
-            return
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """Summarize replay messages before running the agent loop."""
+        if self._replay_messages:
+            summary = await self._summarize_messages(self._replay_messages)
+            self._replay_messages = [
+                {"role": "assistant", "content": f"Summary of previous attempts:\n{summary}"}
+            ]
+        await super().run(instruction, environment, context)
 
-        # Create a summary using the LLM
-        summary_messages = [
-            {"role": "system", "content": "You are a helpful assistant that summarizes conversations."},
-            {"role": "user", "content": f"Please summarize the following conversation concisely:\n\n{json.dumps(messages, indent=2)}"}
-        ]
-        
+    async def _summarize_messages(self, messages: list[dict]) -> str:
+        """Use the LLM to summarize previous conversation messages."""
+        prompt = (
+            "Please summarize the following conversation concisely, "
+            "focusing on what was attempted and what went wrong:\n\n"
+            + json.dumps(messages, indent=2)
+        )
         try:
-            # Use sync call for summary (runs during setup)
-            response = litellm.completion(
-                model=self._model_name,
-                messages=summary_messages,
-                **self._model_kwargs,
-            )
-            summary = response.choices[0].message.content
-            if response.usage:
-                self._total_prompt_tokens += response.usage.prompt_tokens
-                self._total_completion_tokens += response.usage.completion_tokens
-            try:
-                self._total_cost += litellm.completion_cost(response)
-            except Exception:
-                pass
+            response = await self._llm.call(prompt=prompt, message_history=[])
+            return response.content
         except Exception:
-            summary = "Previous attempts to complete this task failed."
-
-        self._messages = [
-            {"role": "system", "content": self._system_prompt},
-            {"role": "assistant", "content": f"Summary of previous attempts:\n{summary}"}
-        ]
+            return "Previous attempts to complete this task failed."
