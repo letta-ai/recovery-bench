@@ -16,12 +16,14 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.environments.base import BaseEnvironment
 from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
+from harbor.models.trajectories import Step
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +106,6 @@ class RecoveryTerminus(Terminus2):
             instruction=recovery_instruction,
             terminal_state=terminal_state,
         )
-
-        from harbor.models.trajectories import Step
-        from datetime import datetime, timezone
 
         self._trajectory_steps.append(
             Step(
