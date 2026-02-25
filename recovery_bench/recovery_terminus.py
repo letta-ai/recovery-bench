@@ -8,6 +8,7 @@ with a recovery-oriented prompt.
 Variants:
 - RecoveryTerminus: Full message history recovery
 - RecoveryTerminusWithoutMessages: Environment-only recovery
+- RecoveryTerminusWithMessageSummaries: Summarized history recovery
 """
 
 import asyncio

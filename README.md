@@ -80,7 +80,7 @@ Options:
 
 ### Terminus-2 (ATIF format)
 
-For terminus-2 style agents that output `trajectory.json`:
+Recovery agents extend Harbor's [Terminus-2](https://github.com/laude-institute/harbor/blob/main/src/harbor/agents/terminus_2/terminus_2.py), inheriting its LLM calling (with retry and exponential backoff), context summarization, response parsing, and ATIF trajectory format.
 
 ```bash
 # Initial
@@ -91,9 +91,16 @@ For terminus-2 style agents that output `trajectory.json`:
 ```
 
 Variants:
-- `RecoveryTerminus`: Full message history
-- `RecoveryTerminusWithoutMessages`: Environment only
-- `RecoveryTerminusWithMessageSummaries`: Summarized history
+- `RecoveryTerminus`: Full message history from failed attempt injected into context
+- `RecoveryTerminusWithoutMessages`: Environment replay only, no prior messages
+- `RecoveryTerminusWithMessageSummaries`: LLM-generated summary of prior messages
+
+Use model config files to set model params:
+```bash
+python -m recovery_bench.run_recovery \
+    --traces jobs/initial-haiku-xxx \
+    --model-config configs/models/sonnet-46-max.json
+```
 
 ### LettaCode (events JSONL format)
 
