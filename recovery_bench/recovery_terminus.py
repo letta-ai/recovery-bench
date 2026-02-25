@@ -42,16 +42,22 @@ class RecoveryTerminus(Terminus2):
     """
 
     def __init__(self, model_kwargs: dict = None, **kwargs):
-        # Extract recovery-specific kwargs before passing to Terminus2
-        # model_kwargs contains things like reasoning_effort that Terminus2
-        # accepts as direct params
+        # Extract params from model_kwargs that Terminus2 accepts directly
         model_kwargs = model_kwargs or {}
         reasoning_effort = model_kwargs.pop("reasoning_effort", None)
+        temperature = model_kwargs.pop("temperature", None)
 
-        super().__init__(
-            reasoning_effort=reasoning_effort,
-            **kwargs,
-        )
+        # Anthropic requires temperature=1 when reasoning is enabled
+        if reasoning_effort and temperature is None:
+            temperature = 1.0
+
+        init_kwargs = {**kwargs}
+        if reasoning_effort:
+            init_kwargs["reasoning_effort"] = reasoning_effort
+        if temperature is not None:
+            init_kwargs["temperature"] = temperature
+
+        super().__init__(**init_kwargs)
 
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._include_messages = True
