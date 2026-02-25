@@ -28,6 +28,26 @@ from harbor.models.trajectories import Step
 logger = logging.getLogger(__name__)
 
 
+def save_usage(logs_dir: Path | None, context: AgentContext) -> None:
+    """Save usage stats to a separate JSON file in the task dir."""
+    usage = {
+        "prompt_tokens": context.n_input_tokens or 0,
+        "completion_tokens": context.n_output_tokens or 0,
+        "total_tokens": (context.n_input_tokens or 0) + (context.n_output_tokens or 0),
+        "cost_usd": round(context.cost_usd or 0, 6),
+    }
+    if logs_dir:
+        usage_path = Path(logs_dir).parent / "usage.json"
+    else:
+        usage_path = Path("usage.json")
+    try:
+        usage_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(usage_path, "w") as f:
+            json.dump(usage, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save usage: {e}")
+
+
 @dataclass
 class ReplayCommand:
     """A command extracted from a previous trajectory for replay."""
@@ -152,31 +172,7 @@ class RecoveryTerminus(Terminus2):
                 context.metadata["all_messages"] = self._chat.messages
 
             self._dump_trajectory()
-
-            # Also save usage.json for easy aggregation
-            self._save_usage(context)
-
-    def _save_usage(self, context: AgentContext) -> None:
-        """Save usage stats to a separate JSON file in the task dir."""
-        usage = {
-            "prompt_tokens": context.n_input_tokens or 0,
-            "completion_tokens": context.n_output_tokens or 0,
-            "total_tokens": (context.n_input_tokens or 0) + (context.n_output_tokens or 0),
-            "cost_usd": round(context.cost_usd or 0, 6),
-        }
-
-        if self.logs_dir:
-            usage_path = Path(self.logs_dir).parent / "usage.json"
-        else:
-            usage_path = Path("usage.json")
-
-        try:
-            usage_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(usage_path, "w") as f:
-                json.dump(usage, f, indent=2)
-            logger.info(f"Usage saved to {usage_path}")
-        except Exception as e:
-            logger.error(f"Failed to save usage: {e}")
+            save_usage(self.logs_dir, context)
 
     # ===== Trajectory replay helpers =====
 
@@ -317,6 +313,32 @@ class RecoveryTerminus(Terminus2):
             return last_output or ""
         except Exception:
             return ""
+
+
+class BaselineTerminus(Terminus2):
+    """
+    Baseline agent: runs Terminus2 fresh on the task with no replay.
+
+    Used to compare "strong model from scratch" vs "strong model with recovery".
+    Accepts model_kwargs so it works with the same run_recovery.py pipeline.
+    """
+
+    def __init__(self, model_kwargs: dict = None, **kwargs):
+        super().__init__(**(model_kwargs or {}), **kwargs)
+
+    @staticmethod
+    def name() -> str:
+        return "baseline-terminus"
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """Run Terminus2, then save usage.json for aggregation."""
+        await super().run(instruction, environment, context)
+        save_usage(self.logs_dir, context)
 
 
 class RecoveryTerminusWithoutMessages(RecoveryTerminus):
