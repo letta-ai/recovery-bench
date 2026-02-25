@@ -338,3 +338,45 @@ class RecoveryTerminusWithoutMessages(RecoveryTerminus):
     @staticmethod
     def name() -> str:
         return "recovery-terminus-without-messages"
+
+
+class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
+    """
+    Recovery agent that injects a summarized version of the previous
+    conversation history instead of the full messages.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._include_messages = True
+
+    @staticmethod
+    def name() -> str:
+        return "recovery-terminus-with-summaries"
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """Summarize replay messages before running the agent loop."""
+        if self._replay_messages:
+            summary = await self._summarize_messages(self._replay_messages)
+            self._replay_messages = [
+                {"role": "assistant", "content": f"Summary of previous attempts:\n{summary}"}
+            ]
+        await super().run(instruction, environment, context)
+
+    async def _summarize_messages(self, messages: list[dict]) -> str:
+        """Use the LLM to summarize previous conversation messages."""
+        prompt = (
+            "Please summarize the following conversation concisely, "
+            "focusing on what was attempted and what went wrong:\n\n"
+            + json.dumps(messages, indent=2)
+        )
+        try:
+            response = await self._llm.call(prompt=prompt, message_history=[])
+            return response.content
+        except Exception:
+            return "Previous attempts to complete this task failed."
