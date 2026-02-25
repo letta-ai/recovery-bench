@@ -90,16 +90,25 @@ Recovery agents extend Harbor's [Terminus-2](https://github.com/laude-institute/
 --recovery-agent recovery_bench.recovery_terminus:RecoveryTerminus
 ```
 
-Variants:
+Recovery variants:
 - `RecoveryTerminus`: Full message history from failed attempt injected into context
 - `RecoveryTerminusWithoutMessages`: Environment replay only, no prior messages
 - `RecoveryTerminusWithMessageSummaries`: LLM-generated summary of prior messages
 
-Use model config files to set model params:
+Baseline (no replay, fresh start on the same failed tasks):
+- `BaselineTerminus`: Runs Terminus2 from scratch for comparison
+
 ```bash
+# Recovery run
 python -m recovery_bench.run_recovery \
     --traces jobs/initial-haiku-xxx \
     --model-config configs/models/sonnet-46-max.json
+
+# Baseline run (fresh start, no replay)
+python -m recovery_bench.run_recovery \
+    --traces jobs/initial-haiku-xxx \
+    --model-config configs/models/sonnet-46-max.json \
+    --agent recovery_bench.recovery_terminus:BaselineTerminus
 ```
 
 ### LettaCode (events JSONL format)
