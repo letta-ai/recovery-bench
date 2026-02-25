@@ -47,10 +47,6 @@ class RecoveryTerminus(Terminus2):
         reasoning_effort = model_kwargs.pop("reasoning_effort", None)
         temperature = model_kwargs.pop("temperature", None)
 
-        # Anthropic requires temperature=1 when reasoning is enabled
-        if reasoning_effort and temperature is None:
-            temperature = 1.0
-
         init_kwargs = {**kwargs}
         if reasoning_effort:
             init_kwargs["reasoning_effort"] = reasoning_effort
