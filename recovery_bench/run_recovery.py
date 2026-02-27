@@ -31,6 +31,7 @@ from pathlib import Path
 
 from .utils import (
     aggregate_usage,
+    get_agent_name,
     get_unsolved_tasks,
     reorganize_directories,
     run_recovery,
@@ -139,8 +140,9 @@ def main():
             config_name = Path(args.model_config).stem
         else:
             config_name = model.split("/")[-1]
+        agent_name = get_agent_name(args.agent)
         traces_short = traces_path.name
-        job_name = f"recovery-{config_name}-on-{traces_short}"
+        job_name = f"{agent_name}-{config_name}-on-{traces_short}"
 
     result = run_recovery(
         traces_folder=args.traces,
