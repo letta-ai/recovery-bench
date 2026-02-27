@@ -219,6 +219,30 @@ def reorganize_directories(base_path: str) -> None:
     logger.info(f"Processed {len(task_to_hash)} tasks")
 
 
+def get_agent_name(agent_import_path: str) -> str:
+    """Get agent name from an import path like 'module.path:ClassName'.
+
+    Dynamically imports the class and calls its name() static method.
+    Falls back to converting the class name to kebab-case.
+    """
+    if ":" not in agent_import_path:
+        # Built-in agent name (e.g., "terminus-2"), use as-is
+        return agent_import_path
+
+    module_path, class_name = agent_import_path.rsplit(":", 1)
+    try:
+        import importlib
+
+        module = importlib.import_module(module_path)
+        cls = getattr(module, class_name)
+        return cls.name()
+    except Exception:
+        # Fallback: convert CamelCase to kebab-case
+        import re
+
+        return re.sub(r"(?<!^)(?=[A-Z])", "-", class_name).lower()
+
+
 def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     """Run a command and return the result."""
     logger.info(f"Running: {' '.join(cmd)}")

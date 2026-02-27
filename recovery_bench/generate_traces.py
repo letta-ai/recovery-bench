@@ -27,6 +27,7 @@ from typing import List
 
 from .utils import (
     cleanup_docker,
+    get_agent_name,
     get_unsolved_tasks,
     reorganize_directories,
     run_command,
@@ -231,7 +232,8 @@ def main():
         # Run recovery
         recovery_model = args.recovery_model or args.model_name
         recovery_model_short = recovery_model.split("/")[-1]
-        recovery_job_name = f"recovery-{recovery_model_short}-{timestamp}-iter{iteration}"
+        recovery_agent_name = get_agent_name(args.recovery_agent)
+        recovery_job_name = f"{recovery_agent_name}-{recovery_model_short}-{timestamp}"
         recovery_traces_dir = run_recovery_for_unsolved(
             traces_folder=current_traces_dir,
             model=recovery_model,
