@@ -10,6 +10,28 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
+def resolve_model(model_str: str) -> tuple[str, dict]:
+    """Resolve a model string to (model_name, model_kwargs).
+
+    Accepts either a model name (e.g. 'anthropic/claude-opus-4-5') or a path
+    to a JSON config file (e.g. 'configs/models/opus-4.6-high.json').
+    """
+    path = Path(model_str)
+    if path.suffix == ".json" and path.exists():
+        with open(path) as f:
+            config = json.load(f)
+        model_name = config.get("model")
+        if not model_name:
+            raise ValueError(f"Model config {model_str} missing 'model' key")
+        return model_name, config.get("model_kwargs", {})
+    return model_str, {}
+
+
+def shorten_model_name(model: str) -> str:
+    """Extract short model name from a full model string (e.g. 'anthropic/claude-opus-4-5' -> 'claude-opus-4-5')."""
+    return model.split("/")[-1]
+
+
 def create_task_hash(task_description: str) -> str:
     """Create 8-character hash from task description."""
     return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
@@ -336,3 +358,65 @@ def aggregate_usage(job_dir: str) -> dict:
         logger.error(f"Failed to save usage: {e}")
 
     return totals
+
+
+def run_recovery_pipeline(
+    traces_folder: str,
+    model: str,
+    job_name: str,
+    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
+    n_concurrent: int = 4,
+    task_ids: List[str] | None = None,
+    model_kwargs: dict | None = None,
+    reorganize: bool = True,
+) -> tuple[str, int]:
+    """Run the full recovery pipeline: reorganize → find unsolved → run recovery → aggregate usage.
+
+    Args:
+        traces_folder: Path to initial traces directory.
+        model: Model name for the recovery agent.
+        job_name: Job name for output directory.
+        agent: Recovery agent import path.
+        n_concurrent: Number of concurrent processes.
+        task_ids: Specific task IDs to recover. None = auto-detect unsolved.
+        model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        reorganize: Whether to reorganize directories with hash prefixes first.
+
+    Returns:
+        (output_job_dir, return_code). output_job_dir is "" if no tasks to recover.
+    """
+    if reorganize:
+        reorganize_directories(traces_folder)
+
+    if task_ids is None:
+        task_ids = get_unsolved_tasks(traces_folder)
+
+    if not task_ids:
+        logger.info("No unsolved tasks found, skipping recovery.")
+        return "", 0
+
+    logger.info(f"Running recovery on {len(task_ids)} task(s) with {model}")
+
+    rc = run_recovery(
+        traces_folder=traces_folder,
+        model=model,
+        task_ids=task_ids,
+        job_name=job_name,
+        agent=agent,
+        n_concurrent=n_concurrent,
+        model_kwargs=model_kwargs,
+    )
+
+    # Aggregate usage
+    job_dir = Path("jobs") / job_name
+    if job_dir.exists():
+        usage = aggregate_usage(str(job_dir))
+        if usage["tasks_with_usage"] > 0:
+            logger.info(
+                f"Total usage: {usage['total_tokens']} tokens "
+                f"({usage['prompt_tokens']} prompt + {usage['completion_tokens']} completion), "
+                f"cost: ${usage['cost_usd']:.4f} "
+                f"across {usage['tasks_with_usage']} task(s)"
+            )
+
+    return f"jobs/{job_name}", rc
