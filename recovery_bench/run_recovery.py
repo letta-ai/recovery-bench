@@ -87,6 +87,12 @@ def main():
         default=8,
         help="Number of concurrent processes",
     )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        help="Harbor environment backend (e.g., docker, daytona, modal)",
+    )
     args = parser.parse_args()
 
     # Load model config if provided
@@ -152,6 +158,7 @@ def main():
         agent=args.agent,
         n_concurrent=args.n_concurrent,
         model_kwargs=model_kwargs,
+        harbor_env=args.env,
     )
 
     # Aggregate and log usage across all tasks

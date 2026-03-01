@@ -44,6 +44,7 @@ def generate_initial_traces(
     n_concurrent: int = 6,
     task_ids: List[str] | None = None,
     agent_import_path: str | None = None,
+    harbor_env: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run."""
     logger.info(f"Generating initial traces for {model_name}...")
@@ -74,6 +75,9 @@ def generate_initial_traces(
         str(n_concurrent),
     ])
 
+    if harbor_env:
+        cmd.extend(["--env", harbor_env])
+
     if task_ids:
         for task_id in task_ids:
             cmd.extend(["--task-name", task_id])
@@ -88,6 +92,7 @@ def run_recovery_for_unsolved(
     job_name: str,
     n_concurrent: int = 4,
     agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
+    harbor_env: str | None = None,
 ) -> str:
     """Run recovery agent for unsolved tasks."""
     logger.info(f"Running recovery for unsolved tasks in {traces_folder}...")
@@ -107,6 +112,7 @@ def run_recovery_for_unsolved(
         job_name=job_name,
         agent=agent,
         n_concurrent=n_concurrent,
+        harbor_env=harbor_env,
     )
 
     return f"jobs/{job_name}"
@@ -173,6 +179,12 @@ def main():
         default="recovery_bench.recovery_terminus:RecoveryTerminus",
         help="Agent import path for recovery (e.g., recovery_bench.recovery_letta_code:RecoveryLettaCode)",
     )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        help="Harbor environment backend (e.g., docker, daytona, modal)",
+    )
 
     args = parser.parse_args()
 
@@ -198,6 +210,7 @@ def main():
             args.n_concurrent,
             args.task_ids,
             args.initial_agent,
+            harbor_env=args.env,
         )
 
     if args.run_initial:
@@ -240,6 +253,7 @@ def main():
             job_name=recovery_job_name,
             n_concurrent=args.n_concurrent,
             agent=args.recovery_agent,
+            harbor_env=args.env,
         )
 
         # Hash reorganize the new traces
