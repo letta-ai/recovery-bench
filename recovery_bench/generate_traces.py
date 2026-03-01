@@ -106,6 +106,9 @@ def main():
     args = parser.parse_args()
 
     # Validate flags
+    if args.resume_initial and args.initial_model:
+        parser.error("--initial-model and --resume-initial are mutually exclusive")
+
     if not args.resume_initial and not args.initial_model:
         parser.error("--initial-model is required unless --resume-initial is used")
 

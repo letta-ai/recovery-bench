@@ -54,6 +54,9 @@ def generate_initial_traces(
 
     Returns:
         Path to the output job directory (e.g. "jobs/<job_name>").
+
+    Raises:
+        RuntimeError: If harbor run fails.
     """
     logger.info(f"Generating initial traces for {model}...")
 
@@ -91,7 +94,9 @@ def generate_initial_traces(
     if model_kwargs:
         cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
 
-    run_command(cmd)
+    result = run_command(cmd)
+    if result.returncode != 0:
+        raise RuntimeError(f"Initial trace generation failed with exit code {result.returncode}")
     return f"jobs/{job_name}"
 
 
@@ -104,6 +109,7 @@ def generate_recovery_traces(
     n_concurrent: int = 4,
     model_kwargs: dict | None = None,
     harbor_env: str | None = None,
+    dataset_version: str = "2.0",
 ) -> int:
     """Run recovery agent on initial traces using harbor.
 
@@ -116,6 +122,7 @@ def generate_recovery_traces(
         n_concurrent: Number of concurrent processes.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
+        dataset_version: Terminal-Bench dataset version.
 
     Returns:
         Exit code from harbor run.
@@ -126,7 +133,7 @@ def generate_recovery_traces(
     cmd = [
         "harbor",
         "run",
-        "--dataset", "terminal-bench@2.0",
+        "--dataset", f"terminal-bench@{dataset_version}",
         "--agent-import-path", agent,
         "--model", model,
         "--n-concurrent", str(n_concurrent),
@@ -165,6 +172,7 @@ def run_recovery(
     task_ids: List[str] | None = None,
     model_kwargs: dict | None = None,
     harbor_env: str | None = None,
+    dataset_version: str = "2.0",
     reorganize: bool = True,
 ) -> tuple[str, int]:
     """Run a single recovery pass: reorganize → find unsolved → recover → aggregate.
@@ -178,6 +186,7 @@ def run_recovery(
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
+        dataset_version: Terminal-Bench dataset version.
         reorganize: Whether to reorganize directories with hash prefixes first.
 
     Returns:
@@ -204,6 +213,7 @@ def run_recovery(
         n_concurrent=n_concurrent,
         model_kwargs=model_kwargs,
         harbor_env=harbor_env,
+        dataset_version=dataset_version,
     )
 
     # Aggregate usage
@@ -268,6 +278,9 @@ def run_pipeline(
 
     # Step 1: Generate initial traces or resume from existing
     if resume_initial:
+        if not Path(resume_initial).exists():
+            logger.error(f"Traces directory does not exist: {resume_initial}")
+            return 1
         initial_traces_dir = resume_initial
         logger.info(f"Resuming from existing initial trajectories at {initial_traces_dir}")
     else:
@@ -320,8 +333,13 @@ def run_pipeline(
             task_ids=task_ids if resume_initial else None,
             model_kwargs=recovery_model_kwargs,
             harbor_env=harbor_env,
+            dataset_version=dataset_version,
             reorganize=False,  # Already reorganized above (or by previous iteration)
         )
+
+        if rc != 0:
+            logger.error(f"Recovery iteration {iteration} failed with exit code {rc}")
+            return rc
 
         if not recovery_traces_dir:
             logger.info(f"No unsolved tasks found in iteration {iteration}, stopping.")
