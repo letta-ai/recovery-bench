@@ -38,6 +38,7 @@ def generate_initial_traces(
     task_ids: List[str] | None = None,
     agent: str | None = None,
     model_kwargs: dict | None = None,
+    harbor_env: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run.
 
@@ -49,6 +50,7 @@ def generate_initial_traces(
         task_ids: Specific task IDs to run. None = all tasks.
         agent: Agent name or import path. None = terminus-2.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
 
     Returns:
         Path to the output job directory (e.g. "jobs/<job_name>").
@@ -79,6 +81,9 @@ def generate_initial_traces(
         str(n_concurrent),
     ])
 
+    if harbor_env:
+        cmd.extend(["--env", harbor_env])
+
     if task_ids:
         for task_id in task_ids:
             cmd.extend(["--task-name", task_id])
@@ -98,6 +103,7 @@ def generate_recovery_traces(
     agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
     n_concurrent: int = 4,
     model_kwargs: dict | None = None,
+    harbor_env: str | None = None,
 ) -> int:
     """Run recovery agent on initial traces using harbor.
 
@@ -109,6 +115,7 @@ def generate_recovery_traces(
         agent: Recovery agent import path.
         n_concurrent: Number of concurrent processes.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
 
     Returns:
         Exit code from harbor run.
@@ -127,6 +134,9 @@ def generate_recovery_traces(
 
     if job_name:
         cmd.extend(["--job-name", job_name])
+
+    if harbor_env:
+        cmd.extend(["--env", harbor_env])
 
     if model_kwargs:
         cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
@@ -154,6 +164,7 @@ def run_recovery(
     n_concurrent: int = 4,
     task_ids: List[str] | None = None,
     model_kwargs: dict | None = None,
+    harbor_env: str | None = None,
     reorganize: bool = True,
 ) -> tuple[str, int]:
     """Run a single recovery pass: reorganize → find unsolved → recover → aggregate.
@@ -166,6 +177,7 @@ def run_recovery(
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         reorganize: Whether to reorganize directories with hash prefixes first.
 
     Returns:
@@ -191,6 +203,7 @@ def run_recovery(
         agent=agent,
         n_concurrent=n_concurrent,
         model_kwargs=model_kwargs,
+        harbor_env=harbor_env,
     )
 
     # Aggregate usage
@@ -222,6 +235,7 @@ def run_pipeline(
     dataset_version: str = "2.0",
     job_name: str | None = None,
     cleanup_container: bool = False,
+    harbor_env: str | None = None,
 ) -> int:
     """Run the full trace generation pipeline.
 
@@ -242,6 +256,7 @@ def run_pipeline(
         dataset_version: Terminal-Bench dataset version.
         job_name: Custom job name for recovery output.
         cleanup_container: Whether to cleanup Docker before running.
+        harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
 
     Returns:
         Exit code (0 = success).
@@ -266,6 +281,7 @@ def run_pipeline(
             task_ids=task_ids,
             agent=initial_agent,
             model_kwargs=initial_model_kwargs,
+            harbor_env=harbor_env,
         )
 
     # Stop here if no recovery model specified
@@ -303,6 +319,7 @@ def run_pipeline(
             n_concurrent=n_concurrent,
             task_ids=task_ids if resume_initial else None,
             model_kwargs=recovery_model_kwargs,
+            harbor_env=harbor_env,
             reorganize=False,  # Already reorganized above (or by previous iteration)
         )
 

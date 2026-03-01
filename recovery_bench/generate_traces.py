@@ -96,6 +96,12 @@ def main():
         default=None,
         help="Custom job name for recovery output (auto-generated if not specified)",
     )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        help="Harbor sandbox backend (e.g., docker, daytona, modal)",
+    )
 
     args = parser.parse_args()
 
@@ -124,6 +130,7 @@ def main():
         dataset_version=args.dataset_version,
         job_name=args.job_name,
         cleanup_container=args.cleanup_container,
+        harbor_env=args.env,
     )
 
 
