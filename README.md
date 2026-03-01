@@ -62,7 +62,7 @@ python -m recovery_bench.generate_traces \
 
 Options:
 - `--initial-model`: Model name or JSON config for initial traces (required unless `--resume-initial`)
-- `--recovery-model`: Model name or JSON config for recovery (defaults to `--initial-model`)
+- `--recovery-model`: Model name or JSON config for recovery (required for recovery, skips recovery if omitted)
 - `--task-id`: Specific task ID(s) to run (can be repeated)
 - `--recovery-agent`: Recovery agent import path
 - `--initial-agent`: Initial agent import path

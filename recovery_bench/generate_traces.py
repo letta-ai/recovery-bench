@@ -109,7 +109,7 @@ def main():
         "--recovery-model",
         type=str,
         default=None,
-        help="Model name or JSON config for recovery (e.g., anthropic/claude-opus-4-5 or configs/models/opus-4.6-high.json). Defaults to --initial-model.",
+        help="Model name or JSON config for recovery (e.g., anthropic/claude-opus-4-5 or configs/models/opus-4.6-high.json). Required for recovery; skips recovery if omitted.",
     )
     parser.add_argument(
         "--n-concurrent", type=int, default=8, help="Number of concurrent processes"
@@ -176,9 +176,9 @@ def main():
     if not args.resume_initial and not args.initial_model:
         parser.error("--initial-model is required unless --resume-initial is used")
 
-    # Validate: need at least one model for recovery (unless --run-initial)
-    if not args.run_initial and not args.recovery_model and not args.initial_model:
-        parser.error("--recovery-model is required when --resume-initial is used without --initial-model")
+    # Validate: need --recovery-model for recovery when resuming
+    if args.resume_initial and not args.recovery_model:
+        parser.error("--recovery-model is required when using --resume-initial")
 
     # Resolve initial model config
     if args.initial_model:
@@ -186,11 +186,9 @@ def main():
     else:
         initial_model, initial_model_kwargs = None, {}
 
-    # Resolve recovery model (defaults to initial model)
+    # Resolve recovery model (only if specified)
     if args.recovery_model:
         recovery_model, recovery_model_kwargs = resolve_model(args.recovery_model)
-    elif initial_model:
-        recovery_model, recovery_model_kwargs = initial_model, initial_model_kwargs
     else:
         recovery_model, recovery_model_kwargs = None, {}
 
@@ -219,8 +217,8 @@ def main():
             initial_model_kwargs,
         )
 
-    if args.run_initial:
-        logger.info(f"Just running initial traces for {initial_model}")
+    if args.run_initial or not recovery_model:
+        logger.info(f"Initial traces complete: {initial_traces_dir}")
         return 0
 
     # Step 2: Reorganize initial traces with hash prefixes
