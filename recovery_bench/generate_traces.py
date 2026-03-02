@@ -1,126 +1,49 @@
 #!/usr/bin/env python3
 """
-Generate recovery-bench traces.
+CLI entry point for the recovery-bench trace generation pipeline.
 
-This script automates the entire trace generation pipeline:
-1. Generate initial traces with an agent (default: terminus-2)
-2. Reorganize traces with hash prefixes for recovery lookup
-3. Iteratively run recovery agent on unsolved tasks
+Usage:
+    # Full pipeline: initial traces + recovery
+    python -m recovery_bench.generate_traces \
+        --initial-model anthropic/claude-haiku-4-5-20251001 \
+        --recovery-model anthropic/claude-opus-4-5-20251101 \
+        --task-id cancel-async-tasks
 
-Usage: python -m recovery_bench.generate_traces <model_name>
+    # Recovery only on existing traces
+    python -m recovery_bench.generate_traces \
+        --recovery-model configs/models/opus-4.6-high.json \
+        --resume-initial jobs/initial-haiku-xxx
 
-Examples:
-    # Default agents (terminus-2 initial, RecoveryTerminus recovery)
-    python -m recovery_bench.generate_traces openai/gpt-4o-mini --task-id cancel-async-tasks
-
-    # Custom agents (LettaCode initial, RecoveryLettaCode recovery)
-    python -m recovery_bench.generate_traces openai/gpt-4o-mini \\
-        --initial-agent recovery_bench.letta_code_agent:LettaCode \\
-        --recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode \\
+    # Initial only (no recovery)
+    python -m recovery_bench.generate_traces \
+        --initial-model openai/gpt-4o-mini \
         --task-id constraints-scheduling
 """
 
 import argparse
 import logging
-from datetime import datetime
-from typing import List
+import sys
 
-from .utils import (
-    cleanup_docker,
-    get_agent_name,
-    get_unsolved_tasks,
-    reorganize_directories,
-    run_command,
-    run_recovery,
-)
+from .pipeline import run_pipeline
+from .utils import resolve_model
 
 logger = logging.getLogger(__name__)
 
 
-def generate_initial_traces(
-    model_name: str,
-    run_id: str,
-    dataset_version: str = "2.0",
-    n_concurrent: int = 6,
-    task_ids: List[str] | None = None,
-    agent_import_path: str | None = None,
-    harbor_env: str | None = None,
-) -> str:
-    """Generate initial traces using harbor run."""
-    logger.info(f"Generating initial traces for {model_name}...")
-
-    cmd = [
-        "harbor",
-        "run",
-        "--dataset",
-        f"terminal-bench@{dataset_version}",
-    ]
-
-    # Use custom agent or default to terminus-2
-    if agent_import_path and ":" in agent_import_path:
-        # Import path format (e.g., module.path:ClassName)
-        cmd.extend(["--agent-import-path", agent_import_path])
-    elif agent_import_path:
-        # Built-in agent name (e.g., terminus-2)
-        cmd.extend(["--agent", agent_import_path])
-    else:
-        cmd.extend(["--agent", "terminus-2"])
-
-    cmd.extend([
-        "--model",
-        model_name,
-        "--job-name",
-        run_id,
-        "--n-concurrent",
-        str(n_concurrent),
-    ])
-
-    if harbor_env:
-        cmd.extend(["--env", harbor_env])
-
-    if task_ids:
-        for task_id in task_ids:
-            cmd.extend(["--task-name", task_id])
-
-    run_command(cmd)
-    return f"jobs/{run_id}"
-
-
-def run_recovery_for_unsolved(
-    traces_folder: str,
-    model: str,
-    job_name: str,
-    n_concurrent: int = 4,
-    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
-    harbor_env: str | None = None,
-) -> str:
-    """Run recovery agent for unsolved tasks."""
-    logger.info(f"Running recovery for unsolved tasks in {traces_folder}...")
-
-    unsolved_task_ids = get_unsolved_tasks(traces_folder)
-
-    if not unsolved_task_ids:
-        logger.info("No unsolved tasks found, skipping recovery.")
-        return traces_folder
-
-    logger.info(f"Found {len(unsolved_task_ids)} unsolved tasks")
-
-    run_recovery(
-        traces_folder=traces_folder,
-        model=model,
-        task_ids=unsolved_task_ids,
-        job_name=job_name,
-        agent=agent,
-        n_concurrent=n_concurrent,
-        harbor_env=harbor_env,
-    )
-
-    return f"jobs/{job_name}"
-
-
 def main():
     parser = argparse.ArgumentParser(description="Generate traces pipeline")
-    parser.add_argument("model_name", help="Model name to use for trace generation")
+    parser.add_argument(
+        "--initial-model",
+        type=str,
+        default=None,
+        help="Model name or JSON config for initial traces. Required unless --resume-initial is used.",
+    )
+    parser.add_argument(
+        "--recovery-model",
+        type=str,
+        default=None,
+        help="Model name or JSON config for recovery. Required for recovery; skips recovery if omitted.",
+    )
     parser.add_argument(
         "--n-concurrent", type=int, default=8, help="Number of concurrent processes"
     )
@@ -131,28 +54,22 @@ def main():
         help="Maximum number of recovery iterations",
     )
     parser.add_argument(
-        "--run-initial",
-        action="store_true",
-        default=False,
-        help="Just run initial traces",
-    )
-    parser.add_argument(
         "--cleanup-container",
         action="store_true",
         default=False,
-        help="Cleanup container before running",
+        help="Cleanup Docker containers before running",
     )
     parser.add_argument(
         "--dataset-version",
         type=str,
         default="2.0",
-        help="Dataset version to use for initial trace generation (e.g., 2.0)",
+        help="Dataset version for initial trace generation (e.g., 2.0)",
     )
     parser.add_argument(
         "--resume-initial",
         type=str,
         default=None,
-        help="Path to an existing initial trajectories directory to resume from (skips initial generation)",
+        help="Path to existing initial traces (skips initial generation, runs recovery only)",
     )
     parser.add_argument(
         "--task-id",
@@ -162,113 +79,62 @@ def main():
         help="Specific task ID(s) to run (can be specified multiple times)",
     )
     parser.add_argument(
-        "--recovery-model",
-        type=str,
-        default=None,
-        help="Model to use for recovery (defaults to same as initial model)",
-    )
-    parser.add_argument(
         "--initial-agent",
         type=str,
         default=None,
-        help="Agent for initial runs: built-in name (e.g., terminus-2) or import path (e.g., recovery_bench.letta_code_agent:LettaCode). Defaults to terminus-2.",
+        help="Agent for initial runs: built-in name (e.g., terminus-2) or import path. Defaults to terminus-2.",
     )
     parser.add_argument(
         "--recovery-agent",
         type=str,
         default="recovery_bench.recovery_terminus:RecoveryTerminus",
-        help="Agent import path for recovery (e.g., recovery_bench.recovery_letta_code:RecoveryLettaCode)",
+        help="Agent import path for recovery",
+    )
+    parser.add_argument(
+        "--job-name",
+        type=str,
+        default=None,
+        help="Custom job name for recovery output (auto-generated if not specified)",
     )
     parser.add_argument(
         "--env",
         type=str,
         default=None,
-        help="Harbor environment backend (e.g., docker, daytona, modal)",
+        help="Harbor sandbox backend (e.g., docker, daytona, modal)",
     )
 
     args = parser.parse_args()
 
-    # Generate timestamp for unique run IDs
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_short = args.model_name.split("/")[-1]
+    # Validate flags
+    if args.resume_initial and args.initial_model:
+        parser.error("--initial-model and --resume-initial are mutually exclusive")
 
-    if args.cleanup_container:
-        cleanup_docker()
+    if not args.resume_initial and not args.initial_model:
+        parser.error("--initial-model is required unless --resume-initial is used")
 
-    # Step 1: Generate initial traces or resume from existing
-    if args.resume_initial:
-        initial_traces_dir = args.resume_initial
-        logger.info(
-            f"Resuming from existing initial trajectories at {initial_traces_dir}"
-        )
-    else:
-        initial_run_id = f"initial-{model_short}-{timestamp}"
-        initial_traces_dir = generate_initial_traces(
-            args.model_name,
-            initial_run_id,
-            args.dataset_version,
-            args.n_concurrent,
-            args.task_ids,
-            args.initial_agent,
-            harbor_env=args.env,
-        )
+    if args.resume_initial and not args.recovery_model:
+        parser.error("--recovery-model is required when using --resume-initial")
 
-    if args.run_initial:
-        logger.info(f"Just running initial traces for {args.model_name}")
-        return
+    # Resolve model configs
+    initial_model, initial_model_kwargs = resolve_model(args.initial_model) if args.initial_model else (None, {})
+    recovery_model, recovery_model_kwargs = resolve_model(args.recovery_model) if args.recovery_model else (None, {})
 
-    # Step 2: Hash reorganize initial traces
-    logger.info(f"Reorganizing traces in {initial_traces_dir}...")
-    reorganize_directories(initial_traces_dir)
-
-    # Keep track of all trace directories
-    all_trace_dirs = [initial_traces_dir]
-
-    # Step 3: Iteratively run recovery agent on unsolved tasks
-    current_traces_dir = initial_traces_dir
-    for iteration in range(1, args.max_iterations + 1):
-        logger.info(f"--- Starting iteration {iteration} ---")
-
-        # Get unsolved tasks from current directory
-        unsolved_task_ids = get_unsolved_tasks(
-            current_traces_dir
-        )
-
-        if not unsolved_task_ids:
-            logger.info(f"No unsolved tasks found in iteration {iteration}, stopping.")
-            break
-
-        logger.info(
-            f"Found {len(unsolved_task_ids)} unsolved tasks for iteration {iteration}"
-        )
-
-        # Run recovery
-        recovery_model = args.recovery_model or args.model_name
-        recovery_model_short = recovery_model.split("/")[-1]
-        recovery_agent_name = get_agent_name(args.recovery_agent)
-        recovery_job_name = f"{recovery_agent_name}-{recovery_model_short}-{timestamp}"
-        recovery_traces_dir = run_recovery_for_unsolved(
-            traces_folder=current_traces_dir,
-            model=recovery_model,
-            job_name=recovery_job_name,
-            n_concurrent=args.n_concurrent,
-            agent=args.recovery_agent,
-            harbor_env=args.env,
-        )
-
-        # Hash reorganize the new traces
-        logger.info(f"Reorganizing traces in {recovery_traces_dir}...")
-        reorganize_directories(recovery_traces_dir)
-
-        # Add to list of all trace directories
-        all_trace_dirs.append(recovery_traces_dir)
-
-        # Update current directory for next iteration
-        current_traces_dir = recovery_traces_dir
-
-    logger.info("--- Pipeline completed successfully! ---")
-    logger.info(f"Initial traces: {initial_traces_dir}")
-    logger.info(f"All trace directories: {all_trace_dirs}")
+    return run_pipeline(
+        initial_model=initial_model,
+        initial_model_kwargs=initial_model_kwargs,
+        recovery_model=recovery_model,
+        recovery_model_kwargs=recovery_model_kwargs,
+        resume_initial=args.resume_initial,
+        initial_agent=args.initial_agent,
+        recovery_agent=args.recovery_agent,
+        task_ids=args.task_ids,
+        n_concurrent=args.n_concurrent,
+        max_iterations=args.max_iterations,
+        dataset_version=args.dataset_version,
+        job_name=args.job_name,
+        cleanup_container=args.cleanup_container,
+        harbor_env=args.env,
+    )
 
 
 if __name__ == "__main__":
@@ -276,4 +142,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(message)s",
     )
-    main()
+    sys.exit(main())

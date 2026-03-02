@@ -10,6 +10,28 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
+def resolve_model(model_str: str) -> tuple[str, dict]:
+    """Resolve a model string to (model_name, model_kwargs).
+
+    Accepts either a model name (e.g. 'anthropic/claude-opus-4-5') or a path
+    to a JSON config file (e.g. 'configs/models/opus-4.6-high.json').
+    """
+    path = Path(model_str)
+    if path.suffix == ".json" and path.exists():
+        with open(path) as f:
+            config = json.load(f)
+        model_name = config.get("model")
+        if not model_name:
+            raise ValueError(f"Model config {model_str} missing 'model' key")
+        return model_name, config.get("model_kwargs", {})
+    return model_str, {}
+
+
+def shorten_model_name(model: str) -> str:
+    """Extract short model name from a full model string (e.g. 'anthropic/claude-opus-4-5' -> 'claude-opus-4-5')."""
+    return model.split("/")[-1]
+
+
 def create_task_hash(task_description: str) -> str:
     """Create 8-character hash from task description."""
     return hashlib.sha256(task_description.encode("utf-8")).hexdigest()[:8]
@@ -254,54 +276,6 @@ def run_command(cmd: List[str], env: dict = None, cwd: str = None):
         logger.error(f"Command failed with return code {result.returncode}")
         return result
     return result
-
-
-def run_recovery(
-    traces_folder: str,
-    model: str,
-    task_ids: List[str],
-    job_name: str | None = None,
-    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
-    n_concurrent: int = 4,
-    model_kwargs: dict | None = None,
-    harbor_env: str | None = None,
-):
-    """Run recovery agent on initial traces using harbor."""
-    env = os.environ.copy()
-    env["TRAJECTORY_FOLDER"] = traces_folder
-
-    cmd = [
-        "harbor",
-        "run",
-        "--dataset", "terminal-bench@2.0",
-        "--agent-import-path", agent,
-        "--model", model,
-        "--n-concurrent", str(n_concurrent),
-    ]
-
-    if job_name:
-        cmd.extend(["--job-name", job_name])
-
-    if harbor_env:
-        cmd.extend(["--env", harbor_env])
-
-    if model_kwargs:
-        import json as json_module
-        cmd.extend(["--agent-kwarg", f"model_kwargs={json_module.dumps(model_kwargs)}"])
-
-    for task_id in task_ids:
-        cmd.extend(["--task-name", task_id])
-
-    logger.info(f"Running: {' '.join(cmd)}")
-
-    try:
-        result = subprocess.run(cmd, env=env, check=True)
-        return result.returncode
-    except subprocess.CalledProcessError as e:
-        return e.returncode
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return 1
 
 
 def aggregate_usage(job_dir: str) -> dict:

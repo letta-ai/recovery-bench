@@ -25,56 +25,52 @@ export OPENAI_API_KEY="your-key"
 
 ### 1. Generate Initial Traces + Run Recovery
 ```bash
-python -m recovery_bench.generate_traces anthropic/claude-haiku-4-5-20251001 \
+python -m recovery_bench.generate_traces \
+    --initial-model anthropic/claude-haiku-4-5-20251001 \
     --recovery-model anthropic/claude-opus-4-5-20251101 \
     --task-id sqlite-db-truncate
 ```
 
 ### 2. Run Recovery on Existing Traces
 ```bash
-python -m recovery_bench.run_recovery \
-    --traces jobs/initial-haiku-xxx \
-    --model anthropic/claude-opus-4-5-20251101
+python -m recovery_bench.generate_traces \
+    --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --resume-initial jobs/initial-haiku-xxx
 ```
 
 ## Usage
 
-### Generate Traces Pipeline
-
-Run the full pipeline: initial traces → recovery:
+Run the full pipeline (initial traces → recovery) or recovery only on existing traces:
 
 ```bash
-python -m recovery_bench.generate_traces <initial-model> \
-    --recovery-model <recovery-model> \
+# Full pipeline
+python -m recovery_bench.generate_traces \
+    --initial-model <model-or-config> \
+    --recovery-model <model-or-config> \
     --task-id <task-name>
+
+# Recovery only on existing traces
+python -m recovery_bench.generate_traces \
+    --recovery-model <model-or-config> \
+    --resume-initial <path-to-initial-traces>
+
+# Using a JSON model config
+python -m recovery_bench.generate_traces \
+    --recovery-model configs/models/opus-4.6-high.json \
+    --resume-initial jobs/initial-haiku-xxx
 ```
 
 Options:
+- `--initial-model`: Model name or JSON config for initial traces (required unless `--resume-initial`)
+- `--recovery-model`: Model name or JSON config for recovery (required for recovery, skips recovery if omitted)
 - `--task-id`: Specific task ID(s) to run (can be repeated)
-- `--recovery-model`: Model for recovery (defaults to initial model)
 - `--recovery-agent`: Recovery agent import path
 - `--initial-agent`: Initial agent import path
-- `--n-concurrent`: Number of concurrent processes (default: 4)
-- `--max-iterations`: Maximum recovery iterations (default: 3)
+- `--n-concurrent`: Number of concurrent processes (default: 8)
+- `--max-iterations`: Maximum recovery iterations (default: 1)
 - `--run-initial`: Only run initial traces, skip recovery
-
-### Run Recovery Separately
-
-Run recovery on existing initial traces:
-
-```bash
-python -m recovery_bench.run_recovery \
-    --traces <path-to-initial-traces> \
-    --model <recovery-model>
-```
-
-Options:
-- `--traces`: Path to initial traces folder (required)
-- `--model`: Model for recovery (required)
-- `--agent`: Recovery agent import path
-- `--task-id`: Specific task ID(s) to recover
-- `--job-name`: Custom job name for output
-- `--n-concurrent`: Number of concurrent processes
+- `--resume-initial`: Path to existing traces (skips initial generation)
+- `--job-name`: Custom job name for recovery output
 
 ## Agents
 
@@ -100,15 +96,15 @@ Baseline (no replay, fresh start on the same failed tasks):
 
 ```bash
 # Recovery run
-python -m recovery_bench.run_recovery \
-    --traces jobs/initial-haiku-xxx \
-    --model-config configs/models/sonnet-46-max.json
+python -m recovery_bench.generate_traces \
+    --recovery-model configs/models/sonnet-46-max.json \
+    --resume-initial jobs/initial-haiku-xxx
 
 # Baseline run (fresh start, no replay)
-python -m recovery_bench.run_recovery \
-    --traces jobs/initial-haiku-xxx \
-    --model-config configs/models/sonnet-46-max.json \
-    --agent recovery_bench.recovery_terminus:BaselineTerminus
+python -m recovery_bench.generate_traces \
+    --recovery-model configs/models/sonnet-46-max.json \
+    --resume-initial jobs/initial-haiku-xxx \
+    --recovery-agent recovery_bench.recovery_terminus:BaselineTerminus
 ```
 
 ### LettaCode (events JSONL format)
@@ -128,7 +124,8 @@ For LettaCode agents that output `letta_events_*.jsonl`:
 Test haiku failing, opus recovering:
 
 ```bash
-python -m recovery_bench.generate_traces anthropic/claude-haiku-4-5-20251001 \
+python -m recovery_bench.generate_traces \
+    --initial-model anthropic/claude-haiku-4-5-20251001 \
     --initial-agent recovery_bench.letta_code_agent:LettaCode \
     --recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode \
     --recovery-model anthropic/claude-opus-4-5-20251101 \
