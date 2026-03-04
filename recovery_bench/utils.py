@@ -16,11 +16,16 @@ from litellm.types.utils import (
 logger = logging.getLogger(__name__)
 
 
-def resolve_model(model_str: str) -> tuple[str, dict]:
-    """Resolve a model string to (model_name, model_kwargs).
+def resolve_model(model_str: str) -> tuple[str, dict, str | None]:
+    """Resolve a model string to (model_name, model_kwargs, letta_code_model).
 
     Accepts either a model name (e.g. 'anthropic/claude-opus-4-5') or a path
     to a JSON config file (e.g. 'configs/models/opus-4.6-high.json').
+
+    Returns:
+        model_name: LiteLLM model identifier (e.g. 'anthropic/claude-sonnet-4-6').
+        model_kwargs: Extra kwargs for the model (e.g. reasoning_effort).
+        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh') or None.
     """
     path = Path(model_str)
     if path.suffix == ".json" and path.exists():
@@ -29,8 +34,8 @@ def resolve_model(model_str: str) -> tuple[str, dict]:
         model_name = config.get("model")
         if not model_name:
             raise ValueError(f"Model config {model_str} missing 'model' key")
-        return model_name, config.get("model_kwargs", {})
-    return model_str, {}
+        return model_name, config.get("model_kwargs", {}), config.get("letta_code_model")
+    return model_str, {}, None
 
 
 def shorten_model_name(model: str) -> str:

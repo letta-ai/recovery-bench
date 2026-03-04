@@ -30,6 +30,18 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
+def _append_agent_kwargs(
+    cmd: list[str],
+    model_kwargs: dict | None = None,
+    letta_code_model: str | None = None,
+) -> None:
+    """Append ``--agent-kwarg`` flags to a harbor command."""
+    if model_kwargs:
+        cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
+    if letta_code_model:
+        cmd.extend(["--agent-kwarg", f"letta_code_model={letta_code_model}"])
+
+
 def generate_initial_traces(
     model: str,
     job_name: str,
@@ -38,6 +50,7 @@ def generate_initial_traces(
     task_ids: List[str] | None = None,
     agent: str | None = None,
     model_kwargs: dict | None = None,
+    letta_code_model: str | None = None,
     harbor_env: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run.
@@ -50,6 +63,7 @@ def generate_initial_traces(
         task_ids: Specific task IDs to run. None = all tasks.
         agent: Agent name or import path. None = terminus-2.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
 
     Returns:
@@ -91,8 +105,7 @@ def generate_initial_traces(
         for task_id in task_ids:
             cmd.extend(["--task-name", task_id])
 
-    if model_kwargs:
-        cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
+    _append_agent_kwargs(cmd, model_kwargs=model_kwargs, letta_code_model=letta_code_model)
 
     result = run_command(cmd)
     if result.returncode != 0:
@@ -108,6 +121,7 @@ def generate_recovery_traces(
     agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
     n_concurrent: int = 4,
     model_kwargs: dict | None = None,
+    letta_code_model: str | None = None,
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
 ) -> int:
@@ -121,6 +135,7 @@ def generate_recovery_traces(
         agent: Recovery agent import path.
         n_concurrent: Number of concurrent processes.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
 
@@ -145,8 +160,7 @@ def generate_recovery_traces(
     if harbor_env:
         cmd.extend(["--env", harbor_env])
 
-    if model_kwargs:
-        cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
+    _append_agent_kwargs(cmd, model_kwargs=model_kwargs, letta_code_model=letta_code_model)
 
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
@@ -171,6 +185,7 @@ def run_recovery(
     n_concurrent: int = 4,
     task_ids: List[str] | None = None,
     model_kwargs: dict | None = None,
+    letta_code_model: str | None = None,
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
     reorganize: bool = True,
@@ -185,6 +200,7 @@ def run_recovery(
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
+        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
         reorganize: Whether to reorganize directories with hash prefixes first.
@@ -212,6 +228,7 @@ def run_recovery(
         agent=agent,
         n_concurrent=n_concurrent,
         model_kwargs=model_kwargs,
+        letta_code_model=letta_code_model,
         harbor_env=harbor_env,
         dataset_version=dataset_version,
     )
@@ -234,8 +251,10 @@ def run_recovery(
 def run_pipeline(
     initial_model: str | None = None,
     initial_model_kwargs: dict | None = None,
+    initial_letta_code_model: str | None = None,
     recovery_model: str | None = None,
     recovery_model_kwargs: dict | None = None,
+    recovery_letta_code_model: str | None = None,
     resume_initial: str | None = None,
     initial_agent: str | None = None,
     recovery_agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
@@ -255,8 +274,10 @@ def run_pipeline(
     Args:
         initial_model: Model name for initial traces. Required unless resume_initial is set.
         initial_model_kwargs: Extra model kwargs for initial traces.
+        initial_letta_code_model: Letta Code model id for initial traces.
         recovery_model: Model name for recovery. None = skip recovery.
         recovery_model_kwargs: Extra model kwargs for recovery.
+        recovery_letta_code_model: Letta Code model id for recovery.
         resume_initial: Path to existing initial traces (skips generation).
         initial_agent: Agent name or import path for initial traces.
         recovery_agent: Agent import path for recovery.
@@ -295,6 +316,7 @@ def run_pipeline(
             task_ids=task_ids,
             agent=initial_agent,
             model_kwargs=initial_model_kwargs,
+            letta_code_model=initial_letta_code_model,
             harbor_env=harbor_env,
         )
 
@@ -333,6 +355,7 @@ def run_pipeline(
             n_concurrent=n_concurrent,
             task_ids=task_ids if resume_initial else None,
             model_kwargs=recovery_model_kwargs,
+            letta_code_model=recovery_letta_code_model,
             harbor_env=harbor_env,
             dataset_version=dataset_version,
             reorganize=False,  # Already reorganized above (or by previous iteration)
