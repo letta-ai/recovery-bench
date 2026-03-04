@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import shlex
 import tempfile
@@ -10,6 +11,10 @@ from pathlib import Path
 from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+
+from recovery_bench.utils import calculate_cost, save_usage
+
+logger = logging.getLogger(__name__)
 
 
 class LettaCode(BaseInstalledAgent):
@@ -194,6 +199,7 @@ class LettaCode(BaseInstalledAgent):
         logs_dir = Path(self.logs_dir)
         logs_dir.mkdir(parents=True, exist_ok=True)
         agent_id: str | None = None
+        events_text: str = ""
         try:
             # 1. Save events stream
             events_out = await environment.exec(
@@ -264,6 +270,23 @@ class LettaCode(BaseInstalledAgent):
         except Exception:
             pass
 
+        # Extract usage from events and save cost tracking data
+        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        try:
+            usage = self._extract_usage_from_events(events_text)
+            cost = calculate_cost(model_name, usage)
+            context.n_input_tokens = usage["prompt_tokens"] or None
+            context.n_output_tokens = usage["completion_tokens"] or None
+            context.cost_usd = cost if cost > 0 else None
+
+            extra = {}
+            for key in ("cached_input_tokens", "cache_write_tokens", "reasoning_tokens"):
+                if usage.get(key, 0) > 0:
+                    extra[key] = usage[key]
+            save_usage(self.logs_dir, context, extra_fields=extra or None)
+        except Exception as e:
+            logger.warning(f"Failed to extract/save usage: {e}")
+
         # Record minimal metadata
         context.metadata = {
             **(context.metadata or {}),
@@ -273,6 +296,59 @@ class LettaCode(BaseInstalledAgent):
 
         if run_error is not None:
             raise run_error
+
+    @staticmethod
+    def _extract_usage_from_events(events_text: str) -> dict:
+        """Extract token usage from Letta Code stream-json events.
+
+        Checks two formats:
+        1. ``message_type == "usage_statistics"`` events (Letta streaming API)
+        2. Last event with ``type == "result"`` containing a ``usage`` field
+
+        Returns a dict with prompt_tokens, completion_tokens,
+        cached_input_tokens, cache_write_tokens, reasoning_tokens.
+        """
+        totals: dict[str, int] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+        }
+
+        parsed_events: list[dict] = []
+        found_usage_stats = False
+
+        for line in events_text.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            parsed_events.append(event)
+
+            # Format 1: usage_statistics messages (may appear multiple times)
+            if event.get("message_type") == "usage_statistics":
+                found_usage_stats = True
+                for key in totals:
+                    totals[key] += event.get(key, 0)
+                # Also check nested details (OpenAI-style)
+                details = event.get("prompt_tokens_details") or {}
+                totals["cached_input_tokens"] += details.get("cached_tokens", 0)
+                details = event.get("completion_tokens_details") or {}
+                totals["reasoning_tokens"] += details.get("reasoning_tokens", 0)
+
+        # Format 2 fallback: last result event
+        if not found_usage_stats and parsed_events:
+            last = parsed_events[-1]
+            if last.get("type") == "result" and "usage" in last:
+                usage = last["usage"]
+                for key in totals:
+                    totals[key] += usage.get(key, 0)
+
+        return totals
 
     def _extract_agent_id_from_events(self, logs_dir: Path, ts: str) -> str | None:
         """Extract agent ID from events JSONL file as fallback."""
