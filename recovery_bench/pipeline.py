@@ -284,8 +284,9 @@ def run_pipeline(
         initial_traces_dir = resume_initial
         logger.info(f"Resuming from existing initial trajectories at {initial_traces_dir}")
     else:
+        initial_agent_name = get_agent_name(initial_agent) if initial_agent else "terminus-2"
         model_short = shorten_model_name(initial_model)
-        initial_run_id = f"initial-{model_short}-{timestamp}"
+        initial_run_id = f"initial-{initial_agent_name}-{model_short}-{timestamp}"
         initial_traces_dir = generate_initial_traces(
             model=initial_model,
             job_name=initial_run_id,
