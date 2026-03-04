@@ -40,13 +40,61 @@ class LettaCode(BaseInstalledAgent):
         return []
 
     def populate_context_post_run(self, context: AgentContext) -> None:
+        """Populate agent context from downloaded logs (e.g. after timeout).
+
+        Harbor calls this when ``context.is_empty()`` returns True, which
+        happens when ``run()`` is cancelled by a timeout before it can
+        populate the context itself.  Harbor's ``_maybe_download_logs``
+        copies the container's ``/logs/agent/`` directory to
+        ``self.logs_dir`` first, so event files should be available here.
         """
-        Populate the agent context after Letta finishes executing.
-        
-        This is typically called by BaseInstalledAgent.run(), but we override
-        run() below with custom logic, so this may not be called.
-        """
-        pass
+        logs_dir = Path(self.logs_dir)
+
+        # Find the events JSONL file — could be named either way:
+        #   {ts}.events.jsonl  (raw download from container)
+        #   letta_events_{ts}.jsonl  (renamed by run() on normal completion)
+        events_files = sorted(logs_dir.glob("*.events.jsonl")) + sorted(logs_dir.glob("letta_events_*.jsonl"))
+        if not events_files:
+            return
+
+        events_text = events_files[0].read_text()
+        if not events_text.strip():
+            return
+
+        # Extract agent ID
+        agent_id = None
+        for line in events_text.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+                aid = event.get("agent_id") or event.get("session_id")
+                if aid and isinstance(aid, str) and aid.startswith("agent-"):
+                    agent_id = aid
+                    break
+            except json.JSONDecodeError:
+                continue
+
+        if agent_id:
+            (logs_dir / "letta_agent_id_recovered.txt").write_text(agent_id)
+
+        # Extract usage and cost
+        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        try:
+            usage = self._extract_usage_from_events(events_text)
+            cost = calculate_cost(model_name, usage)
+            context.n_input_tokens = usage["prompt_tokens"] or None
+            context.n_output_tokens = usage["completion_tokens"] or None
+            context.cost_usd = cost if cost > 0 else None
+
+            extra = {}
+            for key in ("cached_input_tokens", "cache_write_tokens", "reasoning_tokens"):
+                if usage.get(key, 0) > 0:
+                    extra[key] = usage[key]
+            save_usage(self.logs_dir, context, extra_fields=extra or None)
+        except Exception as e:
+            logger.warning(f"Failed to extract usage in populate_context_post_run: {e}")
 
     async def setup(self, environment: BaseEnvironment) -> None:
         """
@@ -111,16 +159,18 @@ class LettaCode(BaseInstalledAgent):
             except Exception:
                 pass
 
-        # Prepare timestamped base path for agent logs inside the environment
+        # Prepare timestamped base path for agent logs inside the environment.
+        # Write to /logs/agent/ (harbor's standard path) so that harbor's
+        # _maybe_download_logs can recover files on agent timeout.
         ts = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
-        base = f"/agent-logs/letta/{ts}"
+        base = f"/logs/agent/{ts}"
 
         # Build a container-side script to run letta and capture events
         run_script = (
             "#!/usr/bin/env bash\n"
             "set -eo pipefail\n"
             "source ~/.bashrc >/dev/null 2>&1 || true\n"
-            "mkdir -p /agent-logs/letta\n"
+            "mkdir -p /logs/agent\n"
             f"letta --new-agent {model_flag}-p {escaped_instruction} --permission-mode bypassPermissions --output-format stream-json 2>'{base}.stderr.log' | tee '{base}.events.jsonl'\n"
         )
 
