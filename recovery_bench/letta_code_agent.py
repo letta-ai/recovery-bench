@@ -333,12 +333,12 @@ class LettaCode(BaseInstalledAgent):
             if event.get("message_type") == "usage_statistics":
                 found_usage_stats = True
                 for key in totals:
-                    totals[key] += event.get(key, 0)
+                    totals[key] += event.get(key) or 0
                 # Also check nested details (OpenAI-style)
                 details = event.get("prompt_tokens_details") or {}
-                totals["cached_input_tokens"] += details.get("cached_tokens", 0)
+                totals["cached_input_tokens"] += details.get("cached_tokens") or 0
                 details = event.get("completion_tokens_details") or {}
-                totals["reasoning_tokens"] += details.get("reasoning_tokens", 0)
+                totals["reasoning_tokens"] += details.get("reasoning_tokens") or 0
 
         # Format 2 fallback: last result event
         if not found_usage_stats and parsed_events:
@@ -346,7 +346,7 @@ class LettaCode(BaseInstalledAgent):
             if last.get("type") == "result" and "usage" in last:
                 usage = last["usage"]
                 for key in totals:
-                    totals[key] += usage.get(key, 0)
+                    totals[key] += usage.get(key) or 0
 
         return totals
 
