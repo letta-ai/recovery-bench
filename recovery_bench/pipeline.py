@@ -320,6 +320,18 @@ def run_pipeline(
             harbor_env=harbor_env,
         )
 
+    # Aggregate usage for initial traces
+    initial_job_dir = Path(initial_traces_dir)
+    if initial_job_dir.exists():
+        usage = aggregate_usage(str(initial_job_dir))
+        if usage["tasks_with_usage"] > 0:
+            logger.info(
+                f"Initial usage: {usage['total_tokens']} tokens "
+                f"({usage['prompt_tokens']} prompt + {usage['completion_tokens']} completion), "
+                f"cost: ${usage['cost_usd']:.4f} "
+                f"across {usage['tasks_with_usage']} task(s)"
+            )
+
     # Stop here if no recovery model specified
     if not recovery_model:
         logger.info(f"Initial traces complete: {initial_traces_dir}")
