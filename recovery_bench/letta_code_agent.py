@@ -113,10 +113,10 @@ class LettaCode(BaseInstalledAgent):
         # Build a container-side script to run letta and capture events
         run_script = (
             "#!/usr/bin/env bash\n"
-            "set -e\n"
+            "set -eo pipefail\n"
             "source ~/.bashrc >/dev/null 2>&1 || true\n"
             "mkdir -p /agent-logs/letta\n"
-            f"letta --new-agent {model_flag}-p {escaped_instruction} --permission-mode bypassPermissions --output-format stream-json | tee '{base}.events.jsonl'\n"
+            f"letta --new-agent {model_flag}-p {escaped_instruction} --permission-mode bypassPermissions --output-format stream-json 2>'{base}.stderr.log' | tee '{base}.events.jsonl'\n"
         )
 
         logs_dir = Path(self.logs_dir)
@@ -202,6 +202,18 @@ class LettaCode(BaseInstalledAgent):
             )
             events_text = events_out.stdout or ""
             (logs_dir / f"letta_events_{ts}.jsonl").write_text(events_text)
+
+            # 1b. Save stderr log from letta CLI
+            try:
+                stderr_out = await environment.exec(
+                    f"bash -lc 'cat \"{base}.stderr.log\" 2>/dev/null || true'",
+                    timeout_sec=None,
+                )
+                stderr_text = stderr_out.stdout or ""
+                if stderr_text.strip():
+                    (logs_dir / f"letta_stderr_{ts}.log").write_text(stderr_text)
+            except Exception:
+                pass
 
             # 2. Extract and save agent ID from settings
             settings_out = await environment.exec(
