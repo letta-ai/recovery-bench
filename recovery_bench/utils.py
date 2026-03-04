@@ -1,11 +1,17 @@
 import hashlib
-import logging
-import subprocess
 import json
+import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import List
+
+from litellm import ModelResponse, Usage, completion_cost
+from litellm.types.utils import (
+    CompletionTokensDetailsWrapper,
+    PromptTokensDetailsWrapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -296,28 +302,24 @@ def calculate_cost(model_name: str, usage: dict) -> float:
     completion_tokens = usage.get("completion_tokens", 0)
     if not model_name or (prompt_tokens == 0 and completion_tokens == 0):
         return 0.0
-    try:
-        from litellm import ModelResponse, Usage, completion_cost
-        from litellm.types.utils import (
-            CompletionTokensDetailsWrapper,
-            PromptTokensDetailsWrapper,
-        )
 
-        resp = ModelResponse()
-        resp.usage = Usage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-            prompt_tokens_details=PromptTokensDetailsWrapper(
-                cached_tokens=usage.get("cached_input_tokens", 0),
-                cache_creation_tokens=usage.get("cache_write_tokens", 0),
-            ),
-            completion_tokens_details=CompletionTokensDetailsWrapper(
-                reasoning_tokens=usage.get("reasoning_tokens", 0),
-            ),
-        )
+    resp = ModelResponse()
+    resp.usage = Usage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        prompt_tokens_details=PromptTokensDetailsWrapper(
+            cached_tokens=usage.get("cached_input_tokens", 0),
+            cache_creation_tokens=usage.get("cache_write_tokens", 0),
+        ),
+        completion_tokens_details=CompletionTokensDetailsWrapper(
+            reasoning_tokens=usage.get("reasoning_tokens", 0),
+        ),
+    )
+    try:
         return float(completion_cost(completion_response=resp, model=model_name))
     except Exception:
+        # Model not in litellm's pricing DB
         logger.debug(f"Could not calculate cost for model {model_name}", exc_info=True)
         return 0.0
 
