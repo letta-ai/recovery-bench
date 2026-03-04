@@ -232,10 +232,18 @@ class LettaCode(BaseInstalledAgent):
         if cli_model:
             agent_env["LETTA_MODEL"] = cli_model
 
+        # --- build full instruction with prompt prefix ----------------------
+        prompt_prefix = (
+            "Complete the task. Do NOT ask clarification questions, you have "
+            "enough information to complete the task. Make sure to finish the "
+            "task to the best of your ability and do not stop at an intermediate step."
+        )
+        full_instruction = f"{prompt_prefix}\n\n{instruction}"
+
         # --- upload instruction -------------------------------------------
-        escaped_instruction = shlex.quote(instruction)
+        escaped_instruction = shlex.quote(full_instruction)
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpf:
-            tmpf.write(instruction)
+            tmpf.write(full_instruction)
             local_instr_path = tmpf.name
         try:
             await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
@@ -256,7 +264,7 @@ class LettaCode(BaseInstalledAgent):
             "set -eo pipefail\n"
             "source ~/.bashrc >/dev/null 2>&1 || true\n"
             "mkdir -p /logs/agent\n"
-            f"letta --new-agent {model_flag}-p {escaped_instruction} "
+            f"letta --new-agent --conv default --no-skills {model_flag}-p {escaped_instruction} "
             f"--permission-mode bypassPermissions --output-format stream-json "
             f"2>'{base}.stderr.log' | tee '{base}.events.jsonl'\n"
         )
