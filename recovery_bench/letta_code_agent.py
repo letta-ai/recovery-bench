@@ -16,11 +16,19 @@ from recovery_bench.utils import calculate_cost, save_usage
 
 logger = logging.getLogger(__name__)
 
+# Keys tried (in order) when extracting agent ID from Letta settings JSON.
+_SETTINGS_AGENT_ID_KEYS = ("agent_id", "default_agent_id", "lastAgent", "last_agent")
+
+# Provider keywords used to select the right system prompt for the CLI.
+_PROVIDER_SYSTEM_MAP = {
+    "letta-claude": ("opus", "sonnet", "haiku", "claude"),
+    "letta-codex": ("gpt", "o1-", "o3-"),
+    "letta-gemini": ("gemini",),
+}
+
 
 class LettaCode(BaseInstalledAgent):
-    """
-    The LettaCode agent uses Letta's CLI tool to solve tasks.
-    """
+    """Run Letta Code CLI inside a harbor environment."""
 
     @staticmethod
     def name() -> str:
@@ -31,321 +39,52 @@ class LettaCode(BaseInstalledAgent):
         return Path(__file__).parent / "install-letta-code.sh.j2"
 
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
-        """
-        Create commands to run the letta agent.
-        
-        Note: This method is overridden by the custom run() method below,
-        but we need to provide an implementation for the abstract method.
-        """
+        # Unused — we override run() directly — but required by the ABC.
         return []
 
-    def populate_context_post_run(self, context: AgentContext) -> None:
-        """Populate agent context from downloaded logs (e.g. after timeout).
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        Harbor calls this when ``context.is_empty()`` returns True, which
-        happens when ``run()`` is cancelled by a timeout before it can
-        populate the context itself.  Harbor's ``_maybe_download_logs``
-        copies the container's ``/logs/agent/`` directory to
-        ``self.logs_dir`` first, so event files should be available here.
-        """
-        logs_dir = Path(self.logs_dir)
-
-        # Find the events JSONL file — could be named either way:
-        #   {ts}.events.jsonl  (raw download from container)
-        #   letta_events_{ts}.jsonl  (renamed by run() on normal completion)
-        events_files = sorted(logs_dir.glob("*.events.jsonl")) + sorted(logs_dir.glob("letta_events_*.jsonl"))
-        if not events_files:
-            return
-
-        events_text = events_files[0].read_text()
-        if not events_text.strip():
-            return
-
-        # Extract agent ID
-        agent_id = None
+    @staticmethod
+    def _extract_agent_id_from_events(events_text: str) -> str | None:
+        """Scan JSONL *text* for the first ``agent-*`` id."""
         for line in events_text.splitlines():
             line = line.strip()
             if not line.startswith("{"):
                 continue
             try:
                 event = json.loads(line)
-                aid = event.get("agent_id") or event.get("session_id")
-                if aid and isinstance(aid, str) and aid.startswith("agent-"):
-                    agent_id = aid
-                    break
             except json.JSONDecodeError:
                 continue
+            for key in ("agent_id", "session_id"):
+                aid = event.get(key)
+                if isinstance(aid, str) and aid.startswith("agent-"):
+                    return aid
+        return None
 
-        if agent_id:
-            (logs_dir / "letta_agent_id_recovered.txt").write_text(agent_id)
-
-        # Extract usage and cost
-        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+    @staticmethod
+    def _extract_agent_id_from_settings(settings_text: str) -> str | None:
+        """Parse Letta ``settings.local.json`` content and return an agent id."""
+        if not settings_text.strip():
+            return None
         try:
-            usage = self._extract_usage_from_events(events_text)
-            cost = calculate_cost(model_name, usage)
-            context.n_input_tokens = usage["prompt_tokens"] or None
-            context.n_output_tokens = usage["completion_tokens"] or None
-            context.cost_usd = cost if cost > 0 else None
-
-            extra = {}
-            for key in ("cached_input_tokens", "cache_write_tokens", "reasoning_tokens"):
-                if usage.get(key, 0) > 0:
-                    extra[key] = usage[key]
-            save_usage(self.logs_dir, context, extra_fields=extra or None)
-        except Exception as e:
-            logger.warning(f"Failed to extract usage in populate_context_post_run: {e}")
-
-    async def setup(self, environment: BaseEnvironment) -> None:
-        """
-        Install the letta CLI inside the task container.
-        """
-        # Use the standard BaseInstalledAgent setup, which handles script rendering
-        await super().setup(environment)
-
-    async def run(
-        self,
-        instruction: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        """
-        Invoke letta CLI inside the environment with the given instruction.
-        """
-        # Preserve optional environment variables for the agent
-        agent_env: dict[str, str] = {}
-        for key in (
-            "LETTA_API_KEY",
-            "LETTA_BASE_URL",
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-        ):
-            if key in os.environ:
-                agent_env[key] = os.environ[key]
-
-        full_instruction = instruction
-        escaped_instruction = shlex.quote(full_instruction)
-        
-        # Use model_name from Harbor (self.model_name) or fall back to env var
-        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
-        
-        # Pass model via environment variable (more reliable than CLI flag)
-        if model_name:
-            agent_env["LETTA_MODEL"] = model_name
-        
-        # Build model flags for CLI
-        model_flag = ""
-        if model_name:
-            model_flag = f"--model {shlex.quote(model_name)} "
-            # Add system flag based on model provider
-            if any(x in model_name.lower() for x in ["opus", "sonnet", "haiku", "claude"]):
-                model_flag += "--system letta-claude "
-            elif any(x in model_name.lower() for x in ["gpt", "o1-", "o3-"]):
-                model_flag += "--system letta-codex "
-            elif "gemini" in model_name.lower():
-                model_flag += "--system letta-gemini "
-
-        # Upload instruction to container to avoid shell-quoting issues
-        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpf:
-            tmpf.write(full_instruction)
-            local_instr_path = tmpf.name
-        try:
-            remote_instr_path = "/installed-agent/instruction.txt"
-            await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
-            await environment.upload_file(local_instr_path, remote_instr_path)
-        finally:
-            try:
-                Path(local_instr_path).unlink(missing_ok=True)  # type: ignore[arg-type]
-            except Exception:
-                pass
-
-        # Prepare timestamped base path for agent logs inside the environment.
-        # Write to /logs/agent/ (harbor's standard path) so that harbor's
-        # _maybe_download_logs can recover files on agent timeout.
-        ts = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
-        base = f"/logs/agent/{ts}"
-
-        # Build a container-side script to run letta and capture events
-        run_script = (
-            "#!/usr/bin/env bash\n"
-            "set -eo pipefail\n"
-            "source ~/.bashrc >/dev/null 2>&1 || true\n"
-            "mkdir -p /logs/agent\n"
-            f"letta --new-agent {model_flag}-p {escaped_instruction} --permission-mode bypassPermissions --output-format stream-json 2>'{base}.stderr.log' | tee '{base}.events.jsonl'\n"
-        )
-
-        logs_dir = Path(self.logs_dir)
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        run_script_path = logs_dir / "run_script.sh"
-        run_script_path.write_text(run_script)
-
-        # Execute the letta run script inside the environment
-        result = None
-        run_error: Exception | None = None
-
-        async def _capture_settings_after_delay(delay_seconds: float) -> None:
-            """
-            After the letta agent has had a brief window to initialize, read
-            `.letta/settings.local.json` and persist both the raw settings and
-            any discovered agent id to the host logs directory.
-            """
-            try:
-                await asyncio.sleep(delay_seconds)
-                logs_dir_local = Path(self.logs_dir)
-                logs_dir_local.mkdir(parents=True, exist_ok=True)
-                settings_out_mid = await environment.exec(
-                    "bash -lc 'cat .letta/settings.local.json 2>/dev/null || true'",
-                    timeout_sec=None,
-                )
-                settings_text_mid = settings_out_mid.stdout or ""
-                if not settings_text_mid.strip():
-                    return
-
-                # Try to extract an agent id from the mid-run settings snapshot.
-                try:
-                    json_start = settings_text_mid.find("{")
-                    cleaned_mid = settings_text_mid[json_start:] if json_start != -1 else settings_text_mid
-                    settings_obj_mid = json.loads(cleaned_mid)
-                    if isinstance(settings_obj_mid, dict):
-                        mid_agent_id = (
-                            settings_obj_mid.get("agent_id")
-                            or settings_obj_mid.get("default_agent_id")
-                            or settings_obj_mid.get("lastAgent")
-                            or settings_obj_mid.get("last_agent")
-                        )
-                        if not mid_agent_id:
-                            for value in settings_obj_mid.values():
-                                if isinstance(value, str) and value.startswith("agent-"):
-                                    mid_agent_id = value
-                                    break
-                        if mid_agent_id:
-                            (logs_dir_local / f"letta_agent_id_{ts}_mid.txt").write_text(
-                                str(mid_agent_id)
-                            )
-                except Exception:
-                    pass
-            except Exception:
-                pass
-
-        try:
-            await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
-            tmp_script_path = "/installed-agent/run-letta.sh"
-            await environment.upload_file(str(run_script_path), tmp_script_path)
-            await environment.exec(f"bash -lc 'chmod +x {tmp_script_path}'", timeout_sec=None)
-
-            # Start a concurrent task that waits briefly for the letta agent to
-            # spin up and write its settings, then captures the agent id.
-            asyncio.create_task(_capture_settings_after_delay(1.0))
-
-            result = await environment.exec(
-                f"bash -lc 'bash {tmp_script_path}'",
-                env=agent_env or None,
-                timeout_sec=None,
-            )
-        except Exception as e:
-            run_error = e
-
-        # Persist logs: events stream, agent ID, and .af export
-        logs_dir = Path(self.logs_dir)
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        agent_id: str | None = None
-        events_text: str = ""
-        try:
-            # 1. Save events stream
-            events_out = await environment.exec(
-                f"bash -lc 'cat \"{base}.events.jsonl\" 2>/dev/null || true'",
-                timeout_sec=None,
-            )
-            events_text = events_out.stdout or ""
-            (logs_dir / f"letta_events_{ts}.jsonl").write_text(events_text)
-
-            # 1b. Save stderr log from letta CLI
-            try:
-                stderr_out = await environment.exec(
-                    f"bash -lc 'cat \"{base}.stderr.log\" 2>/dev/null || true'",
-                    timeout_sec=None,
-                )
-                stderr_text = stderr_out.stdout or ""
-                if stderr_text.strip():
-                    (logs_dir / f"letta_stderr_{ts}.log").write_text(stderr_text)
-            except Exception:
-                pass
-
-            # 2. Extract and save agent ID from settings
-            settings_out = await environment.exec(
-                "bash -lc 'cat .letta/settings.local.json 2>/dev/null || true'",
-                timeout_sec=None,
-            )
-            settings_text = settings_out.stdout or ""
-            if settings_text.strip():
-                try:
-                    json_start = settings_text.find("{")
-                    cleaned = settings_text[json_start:] if json_start != -1 else settings_text
-                    settings_obj = json.loads(cleaned)
-                    if isinstance(settings_obj, dict):
-                        agent_id = (
-                            settings_obj.get("agent_id")
-                            or settings_obj.get("default_agent_id")
-                            or settings_obj.get("lastAgent")
-                            or settings_obj.get("last_agent")
-                        )
-                        if not agent_id:
-                            for value in settings_obj.values():
-                                if isinstance(value, str) and value.startswith("agent-"):
-                                    agent_id = value
-                                    break
-                except Exception:
-                    pass
-
-            if agent_id:
-                (logs_dir / f"letta_agent_id_{ts}.txt").write_text(str(agent_id))
-
-            # 3. Export .af file if agent completed successfully
-            if agent_id and run_error is None:
-                try:
-                    base_url = os.environ.get("LETTA_BASE_URL", "https://api.letta.com").rstrip("/")
-                    export_url = f"{base_url}/v1/agents/{agent_id}/export"
-                    req = urllib.request.Request(export_url, method="GET")
-                    with urllib.request.urlopen(req, timeout=30) as resp:
-                        agent_bytes = resp.read()
-                    (logs_dir / f"letta_agent_export_{ts}.af").write_bytes(agent_bytes)
-                except Exception:
-                    pass
-            
-            # Fallback: extract agent ID from events file if not found in settings
-            if not agent_id:
-                agent_id = self._extract_agent_id_from_events(logs_dir, ts)
-                if agent_id:
-                    (logs_dir / f"letta_agent_id_{ts}.txt").write_text(str(agent_id))
+            json_start = settings_text.find("{")
+            cleaned = settings_text[json_start:] if json_start != -1 else settings_text
+            obj = json.loads(cleaned)
+            if not isinstance(obj, dict):
+                return None
+            for key in _SETTINGS_AGENT_ID_KEYS:
+                val = obj.get(key)
+                if val:
+                    return val
+            # Fallback: first value that looks like an agent id.
+            for val in obj.values():
+                if isinstance(val, str) and val.startswith("agent-"):
+                    return val
         except Exception:
             pass
-
-        # Extract usage from events and save cost tracking data
-        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
-        try:
-            usage = self._extract_usage_from_events(events_text)
-            cost = calculate_cost(model_name, usage)
-            context.n_input_tokens = usage["prompt_tokens"] or None
-            context.n_output_tokens = usage["completion_tokens"] or None
-            context.cost_usd = cost if cost > 0 else None
-
-            extra = {}
-            for key in ("cached_input_tokens", "cache_write_tokens", "reasoning_tokens"):
-                if usage.get(key, 0) > 0:
-                    extra[key] = usage[key]
-            save_usage(self.logs_dir, context, extra_fields=extra or None)
-        except Exception as e:
-            logger.warning(f"Failed to extract/save usage: {e}")
-
-        # Record minimal metadata
-        context.metadata = {
-            **(context.metadata or {}),
-            "letta_return_code": getattr(result, "return_code", None),
-            "letta_logs_ts": ts,
-        }
-
-        if run_error is not None:
-            raise run_error
+        return None
 
     @staticmethod
     def _extract_usage_from_events(events_text: str) -> dict:
@@ -379,18 +118,16 @@ class LettaCode(BaseInstalledAgent):
                 continue
             parsed_events.append(event)
 
-            # Format 1: usage_statistics messages (may appear multiple times)
             if event.get("message_type") == "usage_statistics":
                 found_usage_stats = True
                 for key in totals:
                     totals[key] += event.get(key) or 0
-                # Also check nested details (OpenAI-style)
                 details = event.get("prompt_tokens_details") or {}
                 totals["cached_input_tokens"] += details.get("cached_tokens") or 0
                 details = event.get("completion_tokens_details") or {}
                 totals["reasoning_tokens"] += details.get("reasoning_tokens") or 0
 
-        # Format 2 fallback: last result event
+        # Fallback: last result event
         if not found_usage_stats and parsed_events:
             last = parsed_events[-1]
             if last.get("type") == "result" and "usage" in last:
@@ -400,25 +137,227 @@ class LettaCode(BaseInstalledAgent):
 
         return totals
 
-    def _extract_agent_id_from_events(self, logs_dir: Path, ts: str) -> str | None:
-        """Extract agent ID from events JSONL file as fallback."""
-        events_file = logs_dir / f"letta_events_{ts}.jsonl"
-        if not events_file.exists():
-            return None
-        
+    def _populate_usage(self, events_text: str, context: AgentContext) -> None:
+        """Extract cost/usage from *events_text* and populate *context*."""
+        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        usage = self._extract_usage_from_events(events_text)
+        cost = calculate_cost(model_name, usage)
+        context.n_input_tokens = usage["prompt_tokens"] or None
+        context.n_output_tokens = usage["completion_tokens"] or None
+        context.cost_usd = cost if cost > 0 else None
+
+        extra = {}
+        for key in ("cached_input_tokens", "cache_write_tokens", "reasoning_tokens"):
+            if usage.get(key, 0) > 0:
+                extra[key] = usage[key]
+        save_usage(self.logs_dir, context, extra_fields=extra or None)
+
+    @staticmethod
+    def _build_model_flags(model_name: str) -> str:
+        """Return CLI flags for ``--model`` and ``--system``."""
+        if not model_name:
+            return ""
+        flags = f"--model {shlex.quote(model_name)} "
+        lower = model_name.lower()
+        for system, keywords in _PROVIDER_SYSTEM_MAP.items():
+            if any(kw in lower for kw in keywords):
+                flags += f"--system {system} "
+                break
+        return flags
+
+    def _find_events_text(self) -> str:
+        """Return events JSONL content from the local logs directory.
+
+        Looks for both the raw download name (``{ts}.events.jsonl``) and
+        the renamed copy (``letta_events_{ts}.jsonl``).
+        """
+        logs_dir = Path(self.logs_dir)
+        events_files = sorted(logs_dir.glob("*.events.jsonl")) + sorted(logs_dir.glob("letta_events_*.jsonl"))
+        if not events_files:
+            return ""
+        return events_files[0].read_text()
+
+    # ------------------------------------------------------------------
+    # Harbor lifecycle hooks
+    # ------------------------------------------------------------------
+
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        """Populate agent context from downloaded logs (e.g. after timeout).
+
+        Harbor calls this when ``context.is_empty()`` returns True, which
+        happens when ``run()`` is cancelled by a timeout before it can
+        populate the context itself.  Harbor's ``_maybe_download_logs``
+        copies the container's ``/logs/agent/`` directory to
+        ``self.logs_dir`` first, so event files should be available here.
+        """
+        events_text = self._find_events_text()
+        if not events_text.strip():
+            return
+
+        agent_id = self._extract_agent_id_from_events(events_text)
+        if agent_id:
+            (Path(self.logs_dir) / "letta_agent_id_recovered.txt").write_text(agent_id)
+
         try:
-            with open(events_file, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line.startswith("{"):
-                        continue
-                    try:
-                        event = json.loads(line)
-                        agent_id = event.get("agent_id")
-                        if agent_id and agent_id.startswith("agent-"):
-                            return agent_id
-                    except json.JSONDecodeError:
-                        continue
+            self._populate_usage(events_text, context)
+        except Exception as e:
+            logger.warning(f"Failed to extract usage in populate_context_post_run: {e}")
+
+    async def setup(self, environment: BaseEnvironment) -> None:
+        """Install the letta CLI inside the task container."""
+        await super().setup(environment)
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """Invoke letta CLI inside the environment with the given instruction."""
+
+        # --- environment variables ----------------------------------------
+        agent_env: dict[str, str] = {}
+        for key in ("LETTA_API_KEY", "LETTA_BASE_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            if key in os.environ:
+                agent_env[key] = os.environ[key]
+
+        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        if model_name:
+            agent_env["LETTA_MODEL"] = model_name
+
+        # --- upload instruction -------------------------------------------
+        escaped_instruction = shlex.quote(instruction)
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpf:
+            tmpf.write(instruction)
+            local_instr_path = tmpf.name
+        try:
+            await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
+            await environment.upload_file(local_instr_path, "/installed-agent/instruction.txt")
+        finally:
+            try:
+                Path(local_instr_path).unlink(missing_ok=True)  # type: ignore[arg-type]
+            except Exception:
+                pass
+
+        # --- build run script ---------------------------------------------
+        ts = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
+        base = f"/logs/agent/{ts}"
+        model_flag = self._build_model_flags(model_name)
+
+        run_script = (
+            "#!/usr/bin/env bash\n"
+            "set -eo pipefail\n"
+            "source ~/.bashrc >/dev/null 2>&1 || true\n"
+            "mkdir -p /logs/agent\n"
+            f"letta --new-agent {model_flag}-p {escaped_instruction} "
+            f"--permission-mode bypassPermissions --output-format stream-json "
+            f"2>'{base}.stderr.log' | tee '{base}.events.jsonl'\n"
+        )
+
+        logs_dir = Path(self.logs_dir)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        run_script_path = logs_dir / "run_script.sh"
+        run_script_path.write_text(run_script)
+
+        # --- execute ------------------------------------------------------
+        result = None
+        run_error: Exception | None = None
+
+        async def _capture_settings_after_delay() -> None:
+            """Snapshot settings.local.json shortly after the agent starts."""
+            try:
+                await asyncio.sleep(1.0)
+                out = await environment.exec(
+                    "bash -lc 'cat .letta/settings.local.json 2>/dev/null || true'",
+                    timeout_sec=None,
+                )
+                mid_agent_id = self._extract_agent_id_from_settings(out.stdout or "")
+                if mid_agent_id:
+                    (logs_dir / f"letta_agent_id_{ts}_mid.txt").write_text(mid_agent_id)
+            except Exception:
+                pass
+
+        try:
+            await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
+            tmp_script_path = "/installed-agent/run-letta.sh"
+            await environment.upload_file(str(run_script_path), tmp_script_path)
+            await environment.exec(f"bash -lc 'chmod +x {tmp_script_path}'", timeout_sec=None)
+
+            asyncio.create_task(_capture_settings_after_delay())
+
+            result = await environment.exec(
+                f"bash -lc 'bash {tmp_script_path}'",
+                env=agent_env or None,
+                timeout_sec=None,
+            )
+        except Exception as e:
+            run_error = e
+
+        # --- collect logs -------------------------------------------------
+        agent_id: str | None = None
+        events_text: str = ""
+        try:
+            events_text = await self._download_file(environment, f"{base}.events.jsonl")
+            (logs_dir / f"letta_events_{ts}.jsonl").write_text(events_text)
+
+            stderr_text = await self._download_file(environment, f"{base}.stderr.log")
+            if stderr_text.strip():
+                (logs_dir / f"letta_stderr_{ts}.log").write_text(stderr_text)
+
+            settings_text = await self._download_file(environment, ".letta/settings.local.json")
+            agent_id = self._extract_agent_id_from_settings(settings_text)
+
+            if not agent_id:
+                agent_id = self._extract_agent_id_from_events(events_text)
+
+            if agent_id:
+                (logs_dir / f"letta_agent_id_{ts}.txt").write_text(agent_id)
+
+            if agent_id and run_error is None:
+                self._export_agent(agent_id, logs_dir, ts)
         except Exception:
             pass
-        return None
+
+        # --- populate context ---------------------------------------------
+        try:
+            self._populate_usage(events_text, context)
+        except Exception as e:
+            logger.warning(f"Failed to extract/save usage: {e}")
+
+        context.metadata = {
+            **(context.metadata or {}),
+            "letta_return_code": getattr(result, "return_code", None),
+            "letta_logs_ts": ts,
+        }
+
+        if run_error is not None:
+            raise run_error
+
+    # ------------------------------------------------------------------
+    # Private I/O helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _download_file(environment: BaseEnvironment, remote_path: str) -> str:
+        """Cat a file from the environment, returning '' on failure."""
+        try:
+            out = await environment.exec(
+                f"bash -lc 'cat \"{remote_path}\" 2>/dev/null || true'",
+                timeout_sec=None,
+            )
+            return out.stdout or ""
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _export_agent(agent_id: str, logs_dir: Path, ts: str) -> None:
+        """Download the ``.af`` agent export (best-effort)."""
+        try:
+            base_url = os.environ.get("LETTA_BASE_URL", "https://api.letta.com").rstrip("/")
+            export_url = f"{base_url}/v1/agents/{agent_id}/export"
+            req = urllib.request.Request(export_url, method="GET")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                agent_bytes = resp.read()
+            (logs_dir / f"letta_agent_export_{ts}.af").write_bytes(agent_bytes)
+        except Exception:
+            pass
