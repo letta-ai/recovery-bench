@@ -25,27 +25,9 @@ from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
+from recovery_bench.utils import save_usage
+
 logger = logging.getLogger(__name__)
-
-
-def save_usage(logs_dir: Path | None, context: AgentContext) -> None:
-    """Save usage stats to a separate JSON file in the task dir."""
-    usage = {
-        "prompt_tokens": context.n_input_tokens or 0,
-        "completion_tokens": context.n_output_tokens or 0,
-        "total_tokens": (context.n_input_tokens or 0) + (context.n_output_tokens or 0),
-        "cost_usd": round(context.cost_usd or 0, 6),
-    }
-    if logs_dir:
-        usage_path = Path(logs_dir).parent / "usage.json"
-    else:
-        usage_path = Path("usage.json")
-    try:
-        usage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(usage_path, "w") as f:
-            json.dump(usage, f, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to save usage: {e}")
 
 
 @dataclass

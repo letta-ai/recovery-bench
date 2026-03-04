@@ -1,11 +1,17 @@
 import hashlib
-import logging
-import subprocess
 import json
+import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import List
+
+from litellm import ModelResponse, Usage, completion_cost
+from litellm.types.utils import (
+    CompletionTokensDetailsWrapper,
+    PromptTokensDetailsWrapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -278,10 +284,95 @@ def run_command(cmd: List[str], env: dict = None, cwd: str = None):
     return result
 
 
+def calculate_cost(model_name: str, usage: dict) -> float:
+    """Calculate cost in USD using litellm's pricing data.
+
+    Accounts for cached tokens and reasoning tokens via
+    ``litellm.completion_cost`` with a synthetic ``ModelResponse``.
+
+    Args:
+        model_name: LiteLLM model identifier (e.g. ``anthropic/claude-sonnet-4-5``).
+        usage: Dict with token counts (prompt_tokens, completion_tokens, and
+            optionally cached_input_tokens, cache_write_tokens, reasoning_tokens).
+
+    Returns:
+        Cost in USD, or 0.0 if pricing is unavailable.
+    """
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
+    if not model_name or (prompt_tokens == 0 and completion_tokens == 0):
+        return 0.0
+
+    resp = ModelResponse()
+    resp.usage = Usage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        prompt_tokens_details=PromptTokensDetailsWrapper(
+            cached_tokens=usage.get("cached_input_tokens", 0),
+            cache_creation_tokens=usage.get("cache_write_tokens", 0),
+        ),
+        completion_tokens_details=CompletionTokensDetailsWrapper(
+            reasoning_tokens=usage.get("reasoning_tokens", 0),
+        ),
+    )
+    try:
+        return float(completion_cost(completion_response=resp, model=model_name))
+    except Exception:
+        # Model not in litellm's pricing DB
+        logger.debug(f"Could not calculate cost for model {model_name}", exc_info=True)
+        return 0.0
+
+
+def save_usage(
+    logs_dir: Path | None,
+    context: "AgentContext",
+    extra_fields: dict | None = None,
+) -> None:
+    """Save usage stats to a separate JSON file in the task dir.
+
+    Args:
+        logs_dir: Agent logs directory (usage.json is written to its parent).
+        context: Harbor AgentContext with token counts and cost.
+        extra_fields: Optional dict of additional fields (e.g. cached_input_tokens,
+            cache_write_tokens, reasoning_tokens) to include in usage.json.
+    """
+    usage = {
+        "prompt_tokens": context.n_input_tokens or 0,
+        "completion_tokens": context.n_output_tokens or 0,
+        "total_tokens": (context.n_input_tokens or 0) + (context.n_output_tokens or 0),
+        "cost_usd": round(context.cost_usd or 0, 6),
+    }
+    if extra_fields:
+        usage.update(extra_fields)
+
+    if logs_dir:
+        usage_path = Path(logs_dir).parent / "usage.json"
+    else:
+        usage_path = Path("usage.json")
+    try:
+        usage_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(usage_path, "w") as f:
+            json.dump(usage, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save usage: {e}")
+
+
+_USAGE_AGGREGATE_KEYS = [
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cost_usd",
+    "cached_input_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+]
+
+
 def aggregate_usage(job_dir: str) -> dict:
     """Aggregate usage stats from per-task usage.json files across a job directory."""
     job_path = Path(job_dir)
-    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+    totals: dict = {k: 0 if k != "cost_usd" else 0.0 for k in _USAGE_AGGREGATE_KEYS}
     task_count = 0
 
     for task_dir in sorted(job_path.iterdir()):
@@ -293,16 +384,19 @@ def aggregate_usage(job_dir: str) -> dict:
         try:
             with open(usage_file) as f:
                 usage = json.load(f)
-            totals["prompt_tokens"] += usage.get("prompt_tokens", 0)
-            totals["completion_tokens"] += usage.get("completion_tokens", 0)
-            totals["total_tokens"] += usage.get("total_tokens", 0)
-            totals["cost_usd"] += usage.get("cost_usd", 0.0)
+            for key in _USAGE_AGGREGATE_KEYS:
+                totals[key] += usage.get(key, 0)
             task_count += 1
         except (json.JSONDecodeError, KeyError):
             continue
 
     totals["cost_usd"] = round(totals["cost_usd"], 6)
     totals["tasks_with_usage"] = task_count
+
+    # Drop zero-valued optional fields to keep output clean
+    for key in ("cached_input_tokens", "cache_write_tokens", "reasoning_tokens"):
+        if totals.get(key, 0) == 0:
+            totals.pop(key, None)
 
     # Save to job directory
     usage_file = job_path / "usage.json"
