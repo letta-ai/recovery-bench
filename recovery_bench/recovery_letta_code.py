@@ -39,11 +39,26 @@ class RecoveryLettaCode(LettaCode):
     def name() -> str:
         return "recovery-letta-code"
 
-    def _find_trajectory_folder(self, task_hash: str) -> Path | None:
-        """Find the trajectory folder based on task hash prefix.
-        
-        Only looks for LettaCode events JSONL format.
+    @staticmethod
+    def _find_events_file(agent_dir: Path) -> Path | None:
+        """Find a LettaCode events JSONL file in an agent directory.
+
+        Checks both naming conventions:
+        - ``letta_events_{ts}.jsonl`` (saved by run() on normal completion)
+        - ``{ts}.events.jsonl`` (downloaded by harbor on timeout)
         """
+        if not agent_dir.exists():
+            return None
+        for f in agent_dir.iterdir():
+            if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
+                return f
+        for f in agent_dir.iterdir():
+            if f.name.endswith(".events.jsonl"):
+                return f
+        return None
+
+    def _find_trajectory_folder(self, task_hash: str) -> Path | None:
+        """Find the trajectory folder based on task hash prefix."""
         base_path = Path(self._trajectory_folder)
         
         if not base_path.exists():
@@ -53,22 +68,15 @@ class RecoveryLettaCode(LettaCode):
         # Look for hash-prefixed directories (format: <hash>-<task-id>__<suffix>/)
         for item in base_path.iterdir():
             if item.is_dir() and item.name.startswith(f"{task_hash}-"):
-                agent_dir = item / "agent"
-                
-                # Check for LettaCode events JSONL
-                if agent_dir.exists():
-                    for f in agent_dir.iterdir():
-                        if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                            logger.debug(f"Found LettaCode trajectory for hash {task_hash}: {item}")
-                            return item
+                if self._find_events_file(item / "agent"):
+                    logger.debug(f"Found LettaCode trajectory for hash {task_hash}: {item}")
+                    return item
 
         logger.warning(f"No LettaCode trajectory found for hash {task_hash} in {base_path}")
         return None
 
     def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
         """Extract state-modifying operations from a failed LettaCode trajectory.
-        
-        Only supports LettaCode events JSONL format (letta_events_*.jsonl).
         
         Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
         """
@@ -79,12 +87,9 @@ class RecoveryLettaCode(LettaCode):
         if trajectory_folder is None:
             return []
 
-        # Parse LettaCode events JSONL
-        agent_dir = trajectory_folder / "agent"
-        if agent_dir.exists():
-            for f in agent_dir.iterdir():
-                if f.name.startswith("letta_events_") and f.name.endswith(".jsonl"):
-                    return self._parse_letta_events(f)
+        events_file = self._find_events_file(trajectory_folder / "agent")
+        if events_file:
+            return self._parse_letta_events(events_file)
 
         logger.warning(f"No LettaCode events found in {trajectory_folder}")
         return []
