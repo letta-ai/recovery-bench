@@ -118,14 +118,16 @@ def main():
         parser.error("--recovery-model is required when using --resume-initial")
 
     # Resolve model configs
-    initial_model, initial_model_kwargs = resolve_model(args.initial_model) if args.initial_model else (None, {})
-    recovery_model, recovery_model_kwargs = resolve_model(args.recovery_model) if args.recovery_model else (None, {})
+    initial_model, initial_model_kwargs, initial_lc_model = resolve_model(args.initial_model) if args.initial_model else (None, {}, None)
+    recovery_model, recovery_model_kwargs, recovery_lc_model = resolve_model(args.recovery_model) if args.recovery_model else (None, {}, None)
 
     return run_pipeline(
         initial_model=initial_model,
         initial_model_kwargs=initial_model_kwargs,
+        initial_letta_code_model=initial_lc_model,
         recovery_model=recovery_model,
         recovery_model_kwargs=recovery_model_kwargs,
+        recovery_letta_code_model=recovery_lc_model,
         resume_initial=args.resume_initial,
         initial_agent=args.initial_agent,
         recovery_agent=args.recovery_agent,

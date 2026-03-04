@@ -30,6 +30,11 @@ _PROVIDER_SYSTEM_MAP = {
 class LettaCode(BaseInstalledAgent):
     """Run Letta Code CLI inside a harbor environment."""
 
+    def __init__(self, *args, **kwargs):
+        # Pop letta_code_model before passing to super (which doesn't expect it).
+        self._letta_code_model: str | None = kwargs.pop("letta_code_model", None)
+        super().__init__(*args, **kwargs)
+
     @staticmethod
     def name() -> str:
         return "letta-code"
@@ -221,9 +226,11 @@ class LettaCode(BaseInstalledAgent):
             if key in os.environ:
                 agent_env[key] = os.environ[key]
 
-        model_name = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
-        if model_name:
-            agent_env["LETTA_MODEL"] = model_name
+        # Prefer Letta Code model id (bundles reasoning config) over raw handle.
+        # self.model_name (litellm handle) is still used for cost calculation.
+        cli_model = self._letta_code_model or self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        if cli_model:
+            agent_env["LETTA_MODEL"] = cli_model
 
         # --- upload instruction -------------------------------------------
         escaped_instruction = shlex.quote(instruction)
@@ -242,7 +249,7 @@ class LettaCode(BaseInstalledAgent):
         # --- build run script ---------------------------------------------
         ts = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
         base = f"/logs/agent/{ts}"
-        model_flag = self._build_model_flags(model_name)
+        model_flag = self._build_model_flags(cli_model)
 
         run_script = (
             "#!/usr/bin/env bash\n"
