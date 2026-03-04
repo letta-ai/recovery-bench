@@ -24,6 +24,8 @@ import argparse
 import logging
 import sys
 
+from dotenv import load_dotenv
+
 from .pipeline import run_pipeline
 from .utils import resolve_model
 
@@ -138,6 +140,7 @@ def main():
 
 
 if __name__ == "__main__":
+    load_dotenv()
     logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",
