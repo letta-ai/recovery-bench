@@ -58,21 +58,34 @@ class RecoveryLettaCode(LettaCode):
         return None
 
     def _find_trajectory_folder(self, task_hash: str) -> Path | None:
-        """Find the trajectory folder based on task hash prefix."""
+        """Find the trajectory folder based on task hash prefix.
+
+        Checks for LettaCode events files first, then falls back to
+        ATIF trajectory.json (terminus-2 format).
+        """
         base_path = Path(self._trajectory_folder)
-        
+
         if not base_path.exists():
             logger.warning(f"Trajectory folder not found: {base_path}")
             return None
 
         # Look for hash-prefixed directories (format: <hash>-<task-id>__<suffix>/)
+        # First pass: prefer directories with LettaCode events
         for item in base_path.iterdir():
             if item.is_dir() and item.name.startswith(f"{task_hash}-"):
                 if self._find_events_file(item / "agent"):
                     logger.debug(f"Found LettaCode trajectory for hash {task_hash}: {item}")
                     return item
 
-        logger.warning(f"No LettaCode trajectory found for hash {task_hash} in {base_path}")
+        # Second pass: accept directories with ATIF trajectory.json
+        for item in base_path.iterdir():
+            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
+                for traj_path in [item / "agent" / "trajectory.json", item / "trajectory.json"]:
+                    if traj_path.exists():
+                        logger.debug(f"Found ATIF trajectory for hash {task_hash}: {item}")
+                        return item
+
+        logger.warning(f"No trajectory found for hash {task_hash} in {base_path}")
         return None
 
     def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
@@ -91,7 +104,15 @@ class RecoveryLettaCode(LettaCode):
         if events_file:
             return self._parse_letta_events(events_file)
 
-        logger.warning(f"No LettaCode events found in {trajectory_folder}")
+        # Fallback: try ATIF trajectory.json (terminus-2 format)
+        for traj_path in [
+            trajectory_folder / "agent" / "trajectory.json",
+            trajectory_folder / "trajectory.json",
+        ]:
+            if traj_path.exists():
+                return self._parse_atif_trajectory(traj_path)
+
+        logger.warning(f"No trajectory found in {trajectory_folder}")
         return []
 
     def _parse_letta_events(self, events_file: Path) -> list[dict]:
@@ -186,6 +207,61 @@ class RecoveryLettaCode(LettaCode):
         write_count = sum(1 for op in operations if op["tool"] == "Write")
         edit_count = sum(1 for op in operations if op["tool"] == "Edit")
         logger.info(f"Extracted {len(operations)} operations: {bash_count} Bash, {write_count} Write, {edit_count} Edit")
+        return operations
+
+    def _parse_atif_trajectory(self, trajectory_file: Path) -> list[dict]:
+        """Parse ATIF trajectory.json (terminus-2 format) to extract Bash operations.
+
+        Mirrors the parsing logic from RecoveryTerminus._parse_trajectory() but
+        returns operations in the format expected by _replay_operation().
+
+        Returns list of operation dicts: {"tool": "Bash", "args": {"command": ...}}
+        """
+        logger.debug(f"Parsing ATIF trajectory from {trajectory_file}")
+
+        try:
+            with open(trajectory_file, "r") as f:
+                trajectory = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            logger.error(f"Failed to read ATIF trajectory: {trajectory_file}")
+            return []
+
+        operations = []
+        steps = trajectory.get("steps", trajectory)
+
+        for step in steps:
+            source = step.get("source", step.get("role", ""))
+            if source not in ("agent", "assistant"):
+                continue
+
+            content = step.get("message", step.get("content", ""))
+
+            # Extract commands from tool_calls (ATIF v1.5+)
+            tool_calls = step.get("tool_calls", [])
+            for tool_call in tool_calls:
+                args = tool_call.get("arguments", {})
+                keystrokes = args.get("keystrokes", "")
+                if keystrokes:
+                    cmd = keystrokes.rstrip("\n").rstrip("\r")
+                    # Skip control sequences and empty commands
+                    if cmd and not cmd.startswith("C-"):
+                        operations.append({"tool": "Bash", "args": {"command": cmd}})
+
+            # Fallback: parse commands from message content (old ATIF format)
+            if not tool_calls:
+                try:
+                    response = json.loads(content) if isinstance(content, str) else content
+                    if isinstance(response, dict) and "commands" in response:
+                        for cmd_obj in response["commands"]:
+                            keystrokes = cmd_obj.get("keystrokes", "")
+                            if keystrokes:
+                                cmd = keystrokes.rstrip("\n").rstrip("\r")
+                                if cmd and not cmd.startswith("C-"):
+                                    operations.append({"tool": "Bash", "args": {"command": cmd}})
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        logger.info(f"Extracted {len(operations)} Bash operations from ATIF trajectory")
         return operations
 
     def _extract_args_regex(self, tool_name: str, full_args: str) -> dict | None:
