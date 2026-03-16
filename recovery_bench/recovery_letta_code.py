@@ -6,10 +6,10 @@ This agent extends LettaCode to:
 2. Replay the commands from that trajectory to corrupt the environment
 3. Run LettaCode with a recovery instruction
 
-Variants:
-- RecoveryLettaCode: Environment-only recovery (no history of what was tried)
-- RecoveryLettaCodeWithHistory: Full operation history injected into the prompt
-- RecoveryLettaCodeWithSummary: LLM-summarized history injected into the prompt
+Variants (matching RecoveryTerminus naming):
+- RecoveryLettaCode: Full operation history injected into the prompt
+- RecoveryLettaCodeWithoutMessages: Environment-only recovery (no history)
+- RecoveryLettaCodeWithMessageSummaries: LLM-summarized history injected into the prompt
 """
 
 import json
@@ -364,11 +364,20 @@ class RecoveryLettaCode(LettaCode):
         await super().run(recovery_instruction, environment, context)
 
     async def _build_recovery_instruction(self, instruction: str) -> str:
-        """Build the recovery instruction. Subclasses override to inject history."""
+        """Build recovery instruction with full prior operation history."""
+        ops_text = self._format_operations_as_text(self._replay_operations)
+        history_block = (
+            "\n\n--- PREVIOUS ATTEMPT OPERATIONS ---\n"
+            f"{ops_text}\n"
+            "--- END PREVIOUS ATTEMPT ---"
+        ) if ops_text else ""
+
         return (
             "RECOVERY MODE: The previous attempt to complete this task failed. "
             "The environment has been restored to the state after the failed attempt. "
-            "Please analyze what went wrong and try a DIFFERENT approach.\n\n"
+            "Below is the full list of operations from the failed attempt. "
+            "Please analyze what went wrong and try a DIFFERENT approach.\n"
+            f"{history_block}\n\n"
             "--- ORIGINAL TASK ---\n"
             f"{instruction}"
         )
@@ -462,49 +471,38 @@ class RecoveryLettaCode(LettaCode):
                     await environment.exec(f"bash -lc {shlex.quote(sed_cmd)}", timeout_sec=30)
 
 
-class RecoveryLettaCodeWithHistory(RecoveryLettaCode):
+class RecoveryLettaCodeWithoutMessages(RecoveryLettaCode):
     """
-    Recovery agent that includes the full operation history in the instruction.
+    Recovery agent that restores environment state only (no prior message/operation history).
 
-    Analogous to RecoveryTerminus (full message history). Since LettaCode is
-    a CLI subprocess, we inject the history as formatted text in the prompt.
+    Analogous to RecoveryTerminusWithoutMessages.
     """
 
     @staticmethod
     def name() -> str:
-        return "recovery-letta-code-with-history"
+        return "recovery-letta-code-without-messages"
 
     async def _build_recovery_instruction(self, instruction: str) -> str:
-        ops_text = self._format_operations_as_text(self._replay_operations)
-        history_block = (
-            "\n\n--- PREVIOUS ATTEMPT OPERATIONS ---\n"
-            f"{ops_text}\n"
-            "--- END PREVIOUS ATTEMPT ---"
-        ) if ops_text else ""
-
         return (
             "RECOVERY MODE: The previous attempt to complete this task failed. "
             "The environment has been restored to the state after the failed attempt. "
-            "Below is the full list of operations from the failed attempt. "
-            "Please analyze what went wrong and try a DIFFERENT approach.\n"
-            f"{history_block}\n\n"
+            "Please analyze what went wrong and try a DIFFERENT approach.\n\n"
             "--- ORIGINAL TASK ---\n"
             f"{instruction}"
         )
 
 
-class RecoveryLettaCodeWithSummary(RecoveryLettaCode):
+class RecoveryLettaCodeWithMessageSummaries(RecoveryLettaCode):
     """
     Recovery agent that includes an LLM-generated summary of the previous
     attempt in the instruction.
 
-    Analogous to RecoveryTerminusWithMessageSummaries. Uses litellm to
-    summarize the failed trajectory operations before injecting into the prompt.
+    Analogous to RecoveryTerminusWithMessageSummaries.
     """
 
     @staticmethod
     def name() -> str:
-        return "recovery-letta-code-with-summary"
+        return "recovery-letta-code-with-message-summaries"
 
     async def _build_recovery_instruction(self, instruction: str) -> str:
         ops_text = self._format_operations_as_text(self._replay_operations)
