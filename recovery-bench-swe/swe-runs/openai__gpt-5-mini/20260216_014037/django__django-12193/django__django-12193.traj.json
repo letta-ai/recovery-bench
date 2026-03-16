@@ -1,0 +1,465 @@
+{
+  "info": {
+    "exit_status": "Submitted",
+    "submission": "diff --git a/django/contrib/postgres/forms/array.py b/django/contrib/postgres/forms/array.py\nindex 2e19cd574a..cf6b762d47 100644\n--- a/django/contrib/postgres/forms/array.py\n+++ b/django/contrib/postgres/forms/array.py\n@@ -139,15 +139,18 @@ class SplitArrayWidget(forms.Widget):\n         context['widget']['subwidgets'] = []\n         final_attrs = self.build_attrs(attrs)\n         id_ = final_attrs.get('id')\n+        base_final_attrs = final_attrs\n         for i in range(max(len(value), self.size)):\n             try:\n                 widget_value = value[i]\n             except IndexError:\n                 widget_value = None\n             if id_:\n-                final_attrs = {**final_attrs, 'id': '%s_%s' % (id_, i)}\n+                widget_attrs = {**base_final_attrs, 'id': '%s_%s' % (id_, i)}\n+            else:\n+                widget_attrs = dict(base_final_attrs)\n             context['widget']['subwidgets'].append(\n-                self.widget.get_context(name + '_%s' % i, widget_value, final_attrs)['widget']\n+                self.widget.get_context(name + '_%s' % i, widget_value, widget_attrs)['widget']\n             )\n         return context\n \ndiff --git a/test_check.py b/test_check.py\nnew file mode 100644\nindex 0000000000..55cc04c7a2\n--- /dev/null\n+++ b/test_check.py\n@@ -0,0 +1,13 @@\n+from django.contrib.postgres.forms.array import SplitArrayWidget\n+from django import forms\n+def check(values, attrs):\n+    widget = SplitArrayWidget(forms.CheckboxInput(), size=4)\n+    ctx = widget.get_context('field', values, attrs)\n+    print(\"Attrs passed:\", attrs)\n+    for i, sw in enumerate(ctx['widget']['subwidgets']):\n+        a = sw.get('attrs', {})\n+        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n+print(\"With id attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], {'id': 'fld'})\n+print(\"\\nWith no attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], None)\ndiff --git a/test_check2.py b/test_check2.py\nnew file mode 100644\nindex 0000000000..c665ab00c4\n--- /dev/null\n+++ b/test_check2.py\n@@ -0,0 +1,21 @@\n+import importlib.util\n+from pathlib import Path\n+# Load the array.py module directly to avoid importing the package __init__ (which requires psycopg2)\n+spec = importlib.util.spec_from_file_location(\"pg_array\", Path(\"django/contrib/postgres/forms/array.py\"))\n+pg_array = importlib.util.module_from_spec(spec)\n+spec.loader.exec_module(pg_array)\n+\n+from django import forms\n+\n+def check(values, attrs):\n+    widget = pg_array.SplitArrayWidget(forms.CheckboxInput(), size=4)\n+    ctx = widget.get_context('field', values, attrs)\n+    print(\"Attrs passed:\", attrs)\n+    for i, sw in enumerate(ctx['widget']['subwidgets']):\n+        a = sw.get('attrs', {})\n+        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n+\n+print(\"With id attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], {'id': 'fld'})\n+print(\"\\nWith no attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], None)\ndiff --git a/test_check3.py b/test_check3.py\nnew file mode 100644\nindex 0000000000..98e5647f9a\n--- /dev/null\n+++ b/test_check3.py\n@@ -0,0 +1,42 @@\n+import sys, types, importlib.util\n+from pathlib import Path\n+\n+# Ensure top-level django package is importable from project (it is in cwd)\n+# Create package placeholders for django.contrib, django.contrib.postgres, and django.contrib.postgres.forms\n+def ensure_pkg(name, path):\n+    if name in sys.modules:\n+        return sys.modules[name]\n+    mod = types.ModuleType(name)\n+    mod.__path__ = [str(path)]\n+    sys.modules[name] = mod\n+    # set attribute on parent package if parent exists\n+    parent = name.rpartition('.')[0]\n+    if parent and parent in sys.modules:\n+        setattr(sys.modules[parent], name.rpartition('.')[2], mod)\n+    return mod\n+\n+base = Path('django/contrib/postgres').resolve()\n+forms_path = base / 'forms'\n+ensure_pkg('django.contrib', Path('django/contrib').resolve())\n+ensure_pkg('django.contrib.postgres', base)\n+ensure_pkg('django.contrib.postgres.forms', forms_path)\n+\n+spec = importlib.util.spec_from_file_location('django.contrib.postgres.forms.array', str(forms_path / 'array.py'))\n+module = importlib.util.module_from_spec(spec)\n+sys.modules[spec.name] = module\n+spec.loader.exec_module(module)\n+\n+from django import forms\n+\n+def check(values, attrs):\n+    widget = module.SplitArrayWidget(forms.CheckboxInput(), size=4)\n+    ctx = widget.get_context('field', values, attrs)\n+    print(\"Attrs passed:\", attrs)\n+    for i, sw in enumerate(ctx['widget']['subwidgets']):\n+        a = sw.get('attrs', {})\n+        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n+\n+print(\"With id attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], {'id': 'fld'})\n+print(\"\\nWith no attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], None)\n",
+    "model_stats": {
+      "instance_cost": 0.017987849999999996,
+      "api_calls": 8
+    },
+    "mini_version": "1.14.4",
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).\n\nInclude a THOUGHT section before your command where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE bash command to execute\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. A single bash code block with your command\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE bash code block\n- This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>\n",
+        "timeout_template": "The last command <command>{{action['action']}}</command> timed out and has been killed.\nThe output of the command was:\n <output>\n{{output}}\n</output>\nPlease try another command and make sure to avoid those requiring interactive input.",
+        "format_error_template": "Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.\n\nPlease format your action in triple backticks as shown in <response_example>.\n\n<response_example>\nHere are some thoughts about why you want to perform the action.\n\n```bash\n<action>\n```\n</response_example>\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n",
+        "action_observation_template": "<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "step_limit": 250,
+        "cost_limit": 3.0
+      },
+      "model": {
+        "model_name": "openai/gpt-5-mini",
+        "model_kwargs": {
+          "drop_params": true,
+          "temperature": 0.0
+        },
+        "litellm_model_registry": null,
+        "set_cache_control": null
+      },
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-12193:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 120
+      },
+      "agent_type": "minisweagent.run.extra.swebench.ProgressTrackingAgent",
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    }
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).\n\nInclude a THOUGHT section before your command where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nSplitArrayField with BooleanField always has widgets checked after the first True value.\nDescription\n\t \n\t\t(last modified by Peter Andersen)\n\t \nWhen providing a SplitArrayField BooleanField with preexisting data, the final_attrs dict is updated to include 'checked': True after the for loop has reached the first True value in the initial data array. Once this occurs every widget initialized after that defaults to checked even though the backing data may be False. This is caused by the CheckboxInput widget's get_context() modifying the attrs dict passed into it. This is the only widget that modifies the attrs dict passed into its get_context().\nCheckboxInput setting attrs['checked'] to True: \u200bhttps://github.com/django/django/blob/master/django/forms/widgets.py#L527\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE bash command to execute\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. A single bash code block with your command\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE bash code block\n- This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I need to find where SplitArrayField or CheckboxInput behavior is implemented in this codebase so I can inspect and modify the widget handling to avoid mutating the attrs dict (which causes 'checked' to persist). I'll list the repository root and search recursively for references to SplitArrayField, SplitArray, and CheckboxInput to locate relevant source files to edit next.\n\n```bash\nls -la && grep -R --line-number -E \"SplitArrayField|SplitArray|CheckboxInput\" . || true\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nOQRIM8MHyInMT4m1WpjxzA0j9G",
+          "created": 1771227190,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I need to find where SplitArrayField or CheckboxInput behavior is implemented in this codebase so I can inspect and modify the widget handling to avoid mutating the attrs dict (which causes 'checked' to persist). I'll list the repository root and search recursively for references to SplitArrayField, SplitArray, and CheckboxInput to locate relevant source files to edit next.\n\n```bash\nls -la && grep -R --line-number -E \"SplitArrayField|SplitArray|CheckboxInput\" . || true\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 245,
+            "prompt_tokens": 1350,
+            "total_tokens": 1595,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 128,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ntotal 155\ndrwxrwxrwx   1 root root    30 Sep 10 10:33 .\ndrwxr-xr-x   1 root root     3 Feb 16 07:33 ..\n-rw-r--r--   1 root root   782 Sep 10 10:26 .editorconfig\n-rw-r--r--   1 root root    86 Sep 10 10:26 .eslintignore\n-rw-r--r--   1 root root  1165 Sep 10 10:26 .eslintrc\ndrwxrwxrwx   8 root root    15 Sep 10 10:33 .git\n-rw-r--r--   1 root root   297 Sep 10 10:26 .gitattributes\n-rw-r--r--   1 root root   353 Sep 10 10:26 .gitignore\n-rw-r--r--   1 root root   164 Sep 10 10:26 .hgignore\ndrwxrwxrwx   2 root root     3 Sep 10 10:26 .tx\n-rw-r--r--   1 root root 36806 Sep 10 10:26 AUTHORS\n-rw-r--r--   1 root root  1115 Sep 10 10:26 CONTRIBUTING.rst\ndrwxr-xr-x   2 root root     9 Sep 10 10:33 Django.egg-info\n-rw-r--r--   1 root root    51 Sep 10 10:26 FUNDING.yml\n-rw-r--r--   1 root root   353 Sep 10 10:26 Gruntfile.js\n-rw-r--r--   1 root root   236 Sep 10 10:26 INSTALL\n-rw-r--r--   1 root root  1552 Sep 10 10:26 LICENSE\n-rw-r--r--   1 root root 13221 Sep 10 10:26 LICENSE.python\n-rw-r--r--   1 root root   307 Sep 10 10:26 MANIFEST.in\n-rw-r--r--   1 root root  1900 Sep 10 10:26 README.rst\ndrwxrwxrwx  19 root root    22 Sep 10 10:33 django\ndrwxrwxrwx  13 root root    21 Sep 10 10:26 docs\ndrwxrwxrwx   2 root root     5 Sep 10 10:26 extras\ndrwxrwxrwx   5 root root     6 Sep 10 10:26 js_tests\n-rw-r--r--   1 root root   347 Sep 10 10:26 package.json\ndrwxrwxrwx   2 root root     4 Sep 10 10:26 scripts\n-rw-r--r--   1 root root  2150 Sep 10 10:26 setup.cfg\n-rw-r--r--   1 root root  2368 Sep 10 10:26 setup.py\ndrwxrwxrwx 212 root root   217 Sep 10 10:26 tests\n-rw-r--r--   1 root root  1535 Sep 10 10:26 tox.ini\n./tests/postgres_tests/test_array.py:32:        SimpleArrayField, SplitArrayField, SplitArrayWidget,\n./tests/postgres_tests/test_array.py:934:            array = SplitArrayField(forms.CharField(), size=3)\n./tests/postgres_tests/test_array.py:943:            array = SplitArrayField(forms.CharField(), required=True, size=3)\n./tests/postgres_tests/test_array.py:952:            array = SplitArrayField(forms.CharField(required=False), size=5, remove_trailing_nulls=True)\n./tests/postgres_tests/test_array.py:961:            array = SplitArrayField(\n./tests/postgres_tests/test_array.py:975:            array = SplitArrayField(forms.CharField(), size=3)\n./tests/postgres_tests/test_array.py:985:            SplitArrayField(forms.IntegerField(max_value=100), size=2).clean([0, 101])\n./tests/postgres_tests/test_array.py:991:            array = SplitArrayField(forms.CharField(), size=3)\n./tests/postgres_tests/test_array.py:1005:        field = SplitArrayField(forms.CharField(max_length=2), size=3)\n./tests/postgres_tests/test_array.py:1015:            field = SplitArrayField(forms.IntegerField(), required=False, size=2)\n./tests/postgres_tests/test_array.py:1028:            field = SplitArrayField(forms.IntegerField(), required=False, size=2)\n./tests/postgres_tests/test_array.py:1050:            field = SplitArrayField(forms.IntegerField(), required=False, size=2, remove_trailing_nulls=True)\n./tests/postgres_tests/test_array.py:1073:            SplitArrayWidget(forms.TextInput(), size=2).get_context('name', ['val1', 'val2']),\n./tests/postgres_tests/test_array.py:1108:            SplitArrayWidget(forms.TextInput(), size=2), 'array', None,\n./tests/postgres_tests/test_array.py:1117:            SplitArrayWidget(forms.TextInput(), size=2),\n./tests/postgres_tests/test_array.py:1128:        widget = SplitArrayWidget(forms.TextInput(), size=2)\n./tests/forms_tests/widget_tests/test_checkboxinput.py:1:from django.forms import CheckboxInput\n./tests/forms_tests/widget_tests/test_checkboxinput.py:6:class CheckboxInputTest(WidgetTest):\n./tests/forms_tests/widget_tests/test_checkboxinput.py:7:    widget = CheckboxInput()\n./tests/forms_tests/widget_tests/test_checkboxinput.py:52:        widget = CheckboxInput(check_test=lambda value: value.startswith('hello'))\n./tests/forms_tests/widget_tests/test_checkboxinput.py:70:        widget = CheckboxInput(\n./tests/forms_tests/widget_tests/test_checkboxinput.py:79:        The CheckboxInput widget will return False if the key is not found in\n./tests/model_forms/tests.py:620:        # Empty data doesn't use the model default because CheckboxInput\n./tests/model_forms/tests.py:626:        self.assertIsInstance(mf1.fields['active'].widget, forms.CheckboxInput)\n./docs/releases/1.10.2.txt:23:  and ``SplitArrayWidget`` (:ticket:`27186`). Custom widgets affected by this\n./docs/releases/1.11.1.txt:80:* Updated the ``contrib.postgres`` ``SplitArrayWidget`` to use template-based\n./docs/releases/1.8.6.txt:42:* Fixed crash with ``contrib.postgres.forms.SplitArrayField`` and\n./docs/topics/forms/modelforms.txt:350::class:`~django.forms.CheckboxInput`,\n./docs/ref/contrib/postgres/forms.txt:84:``SplitArrayField``\n./docs/ref/contrib/postgres/forms.txt:87:.. class:: SplitArrayField(base_field, size, remove_trailing_nulls=False)\n./docs/ref/contrib/postgres/forms.txt:112:            SplitArrayField(IntegerField(required=True), size=3, remove_trailing_nulls=False)\n./docs/ref/contrib/postgres/forms.txt:119:            SplitArrayField(IntegerField(required=False), size=3, remove_trailing_nulls=False)\n./docs/ref/contrib/postgres/forms.txt:126:            SplitArrayField(IntegerField(required=True), size=3, remove_trailing_nulls=True)\n./docs/ref/contrib/postgres/forms.txt:133:            SplitArrayField(IntegerField(required=False), size=3, remove_trailing_nulls=True)\n./docs/ref/forms/widgets.txt:311:        Special cases are :class:`~django.forms.CheckboxInput`,\n./docs/ref/forms/widgets.txt:629:``CheckboxInput``\n./docs/ref/forms/widgets.txt:632:.. class:: CheckboxInput\n./docs/ref/forms/widgets.txt:640:    .. attribute:: CheckboxInput.check_test\n./docs/ref/forms/widgets.txt:642:        A callable that takes the value of the ``CheckboxInput`` and returns\n./docs/ref/forms/fields.txt:347:    * Default widget: :class:`CheckboxInput`\n./docs/ref/models/fields.txt:580:The default form widget for this field is :class:`~django.forms.CheckboxInput`,\n./django/forms/fields.py:21:    FILE_INPUT_CONTRADICTION, CheckboxInput, ClearableFileInput, DateInput,\n./django/forms/fields.py:698:    widget = CheckboxInput\n./django/forms/widgets.py:32:    'DateInput', 'DateTimeInput', 'TimeInput', 'CheckboxInput', 'Select',\n./django/forms/widgets.py:442:        if not self.is_required and CheckboxInput().value_from_datadict(\n./django/forms/widgets.py:502:# Defined at module level so that CheckboxInput is picklable (#17976)\n./django/forms/widgets.py:507:class CheckboxInput(Input):\n./django/contrib/postgres/forms/array.py:105:class SplitArrayWidget(forms.Widget):\n./django/contrib/postgres/forms/array.py:168:class SplitArrayField(forms.Field):\n./django/contrib/postgres/forms/array.py:177:        widget = SplitArrayWidget(widget=base_field.widget, size=size)\n./django/contrib/admin/helpers.py:30:checkbox = forms.CheckboxInput({'class': 'action-select'}, lambda value: False)\n./django/contrib/admin/helpers.py:127:        self.is_checkbox = isinstance(self.field.field.widget, forms.CheckboxInput)\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll open the postgres SplitArrayWidget source to inspect how it builds attrs for each subwidget so I can modify it to avoid passing a shared attrs dict to CheckboxInput.get_context (which mutates attrs). I'll display the file with line numbers to find the relevant section.\n\n```bash\nnl -ba django/contrib/postgres/forms/array.py | sed -n '1,240p'\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nOU1MvbhuYwxHTCpJl9OXusA878",
+          "created": 1771227194,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll open the postgres SplitArrayWidget source to inspect how it builds attrs for each subwidget so I can modify it to avoid passing a shared attrs dict to CheckboxInput.get_context (which mutates attrs). I'll display the file with line numbers to find the relevant section.\n\n```bash\nnl -ba django/contrib/postgres/forms/array.py | sed -n '1,240p'\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 157,
+            "prompt_tokens": 3544,
+            "total_tokens": 3701,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 64,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n     1\timport copy\n     2\tfrom itertools import chain\n     3\t\n     4\tfrom django import forms\n     5\tfrom django.contrib.postgres.validators import (\n     6\t    ArrayMaxLengthValidator, ArrayMinLengthValidator,\n     7\t)\n     8\tfrom django.core.exceptions import ValidationError\n     9\tfrom django.utils.translation import gettext_lazy as _\n    10\t\n    11\tfrom ..utils import prefix_validation_error\n    12\t\n    13\t\n    14\tclass SimpleArrayField(forms.CharField):\n    15\t    default_error_messages = {\n    16\t        'item_invalid': _('Item %(nth)s in the array did not validate:'),\n    17\t    }\n    18\t\n    19\t    def __init__(self, base_field, *, delimiter=',', max_length=None, min_length=None, **kwargs):\n    20\t        self.base_field = base_field\n    21\t        self.delimiter = delimiter\n    22\t        super().__init__(**kwargs)\n    23\t        if min_length is not None:\n    24\t            self.min_length = min_length\n    25\t            self.validators.append(ArrayMinLengthValidator(int(min_length)))\n    26\t        if max_length is not None:\n    27\t            self.max_length = max_length\n    28\t            self.validators.append(ArrayMaxLengthValidator(int(max_length)))\n    29\t\n    30\t    def clean(self, value):\n    31\t        value = super().clean(value)\n    32\t        return [self.base_field.clean(val) for val in value]\n    33\t\n    34\t    def prepare_value(self, value):\n    35\t        if isinstance(value, list):\n    36\t            return self.delimiter.join(str(self.base_field.prepare_value(v)) for v in value)\n    37\t        return value\n    38\t\n    39\t    def to_python(self, value):\n    40\t        if isinstance(value, list):\n    41\t            items = value\n    42\t        elif value:\n    43\t            items = value.split(self.delimiter)\n    44\t        else:\n    45\t            items = []\n    46\t        errors = []\n    47\t        values = []\n    48\t        for index, item in enumerate(items):\n    49\t            try:\n    50\t                values.append(self.base_field.to_python(item))\n    51\t            except ValidationError as error:\n    52\t                errors.append(prefix_validation_error(\n    53\t                    error,\n    54\t                    prefix=self.error_messages['item_invalid'],\n    55\t                    code='item_invalid',\n    56\t                    params={'nth': index + 1},\n    57\t                ))\n    58\t        if errors:\n    59\t            raise ValidationError(errors)\n    60\t        return values\n    61\t\n    62\t    def validate(self, value):\n    63\t        super().validate(value)\n    64\t        errors = []\n    65\t        for index, item in enumerate(value):\n    66\t            try:\n    67\t                self.base_field.validate(item)\n    68\t            except ValidationError as error:\n    69\t                errors.append(prefix_validation_error(\n    70\t                    error,\n    71\t                    prefix=self.error_messages['item_invalid'],\n    72\t                    code='item_invalid',\n    73\t                    params={'nth': index + 1},\n    74\t                ))\n    75\t        if errors:\n    76\t            raise ValidationError(errors)\n    77\t\n    78\t    def run_validators(self, value):\n    79\t        super().run_validators(value)\n    80\t        errors = []\n    81\t        for index, item in enumerate(value):\n    82\t            try:\n    83\t                self.base_field.run_validators(item)\n    84\t            except ValidationError as error:\n    85\t                errors.append(prefix_validation_error(\n    86\t                    error,\n    87\t                    prefix=self.error_messages['item_invalid'],\n    88\t                    code='item_invalid',\n    89\t                    params={'nth': index + 1},\n    90\t                ))\n    91\t        if errors:\n    92\t            raise ValidationError(errors)\n    93\t\n    94\t    def has_changed(self, initial, data):\n    95\t        try:\n    96\t            value = self.to_python(data)\n    97\t        except ValidationError:\n    98\t            pass\n    99\t        else:\n   100\t            if initial in self.empty_values and value in self.empty_values:\n   101\t                return False\n   102\t        return super().has_changed(initial, data)\n   103\t\n   104\t\n   105\tclass SplitArrayWidget(forms.Widget):\n   106\t    template_name = 'postgres/widgets/split_array.html'\n   107\t\n   108\t    def __init__(self, widget, size, **kwargs):\n   109\t        self.widget = widget() if isinstance(widget, type) else widget\n   110\t        self.size = size\n   111\t        super().__init__(**kwargs)\n   112\t\n   113\t    @property\n   114\t    def is_hidden(self):\n   115\t        return self.widget.is_hidden\n   116\t\n   117\t    def value_from_datadict(self, data, files, name):\n   118\t        return [self.widget.value_from_datadict(data, files, '%s_%s' % (name, index))\n   119\t                for index in range(self.size)]\n   120\t\n   121\t    def value_omitted_from_data(self, data, files, name):\n   122\t        return all(\n   123\t            self.widget.value_omitted_from_data(data, files, '%s_%s' % (name, index))\n   124\t            for index in range(self.size)\n   125\t        )\n   126\t\n   127\t    def id_for_label(self, id_):\n   128\t        # See the comment for RadioSelect.id_for_label()\n   129\t        if id_:\n   130\t            id_ += '_0'\n   131\t        return id_\n   132\t\n   133\t    def get_context(self, name, value, attrs=None):\n   134\t        attrs = {} if attrs is None else attrs\n   135\t        context = super().get_context(name, value, attrs)\n   136\t        if self.is_localized:\n   137\t            self.widget.is_localized = self.is_localized\n   138\t        value = value or []\n   139\t        context['widget']['subwidgets'] = []\n   140\t        final_attrs = self.build_attrs(attrs)\n   141\t        id_ = final_attrs.get('id')\n   142\t        for i in range(max(len(value), self.size)):\n   143\t            try:\n   144\t                widget_value = value[i]\n   145\t            except IndexError:\n   146\t                widget_value = None\n   147\t            if id_:\n   148\t                final_attrs = {**final_attrs, 'id': '%s_%s' % (id_, i)}\n   149\t            context['widget']['subwidgets'].append(\n   150\t                self.widget.get_context(name + '_%s' % i, widget_value, final_attrs)['widget']\n   151\t            )\n   152\t        return context\n   153\t\n   154\t    @property\n   155\t    def media(self):\n   156\t        return self.widget.media\n   157\t\n   158\t    def __deepcopy__(self, memo):\n   159\t        obj = super().__deepcopy__(memo)\n   160\t        obj.widget = copy.deepcopy(self.widget)\n   161\t        return obj\n   162\t\n   163\t    @property\n   164\t    def needs_multipart_form(self):\n   165\t        return self.widget.needs_multipart_form\n   166\t\n   167\t\n   168\tclass SplitArrayField(forms.Field):\n   169\t    default_error_messages = {\n   170\t        'item_invalid': _('Item %(nth)s in the array did not validate:'),\n   171\t    }\n   172\t\n   173\t    def __init__(self, base_field, size, *, remove_trailing_nulls=False, **kwargs):\n   174\t        self.base_field = base_field\n   175\t        self.size = size\n   176\t        self.remove_trailing_nulls = remove_trailing_nulls\n   177\t        widget = SplitArrayWidget(widget=base_field.widget, size=size)\n   178\t        kwargs.setdefault('widget', widget)\n   179\t        super().__init__(**kwargs)\n   180\t\n   181\t    def _remove_trailing_nulls(self, values):\n   182\t        index = None\n   183\t        if self.remove_trailing_nulls:\n   184\t            for i, value in reversed(list(enumerate(values))):\n   185\t                if value in self.base_field.empty_values:\n   186\t                    index = i\n   187\t                else:\n   188\t                    break\n   189\t            if index is not None:\n   190\t                values = values[:index]\n   191\t        return values, index\n   192\t\n   193\t    def to_python(self, value):\n   194\t        value = super().to_python(value)\n   195\t        return [self.base_field.to_python(item) for item in value]\n   196\t\n   197\t    def clean(self, value):\n   198\t        cleaned_data = []\n   199\t        errors = []\n   200\t        if not any(value) and self.required:\n   201\t            raise ValidationError(self.error_messages['required'])\n   202\t        max_size = max(self.size, len(value))\n   203\t        for index in range(max_size):\n   204\t            item = value[index]\n   205\t            try:\n   206\t                cleaned_data.append(self.base_field.clean(item))\n   207\t            except ValidationError as error:\n   208\t                errors.append(prefix_validation_error(\n   209\t                    error,\n   210\t                    self.error_messages['item_invalid'],\n   211\t                    code='item_invalid',\n   212\t                    params={'nth': index + 1},\n   213\t                ))\n   214\t                cleaned_data.append(None)\n   215\t            else:\n   216\t                errors.append(None)\n   217\t        cleaned_data, null_index = self._remove_trailing_nulls(cleaned_data)\n   218\t        if null_index is not None:\n   219\t            errors = errors[:null_index]\n   220\t        errors = list(filter(None, errors))\n   221\t        if errors:\n   222\t            raise ValidationError(list(chain.from_iterable(errors)))\n   223\t        return cleaned_data\n   224\t\n   225\t    def has_changed(self, initial, data):\n   226\t        try:\n   227\t            data = self.to_python(data)\n   228\t        except ValidationError:\n   229\t            pass\n   230\t        else:\n   231\t            data, _ = self._remove_trailing_nulls(data)\n   232\t            if initial in self.empty_values and data in self.empty_values:\n   233\t                return False\n   234\t        return super().has_changed(initial, data)\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The bug is caused by reusing the same attrs dict (final_attrs) across iterations in SplitArrayWidget.get_context. CheckboxInput.get_context mutates the attrs dict (setting 'checked'), so once one checkbox sets 'checked' True, subsequent widgets inherit it. To fix, create a fresh attrs dict for each subwidget instead of reassigning final_attrs. I'll modify django/contrib/postgres/forms/array.py to compute a base_final_attrs and then build a new widget_attrs per iteration (copying base_final_attrs and adding the id if present), and pass that to each widget.get_context call.\n\n```bash\npython - <<'PY'\nfrom pathlib import Path\np = Path('django/contrib/postgres/forms/array.py')\ns = p.read_text()\nold = \"\"\"        final_attrs = self.build_attrs(attrs)\n        id_ = final_attrs.get('id')\n        for i in range(max(len(value), self.size)):\n            try:\n                widget_value = value[i]\n            except IndexError:\n                widget_value = None\n            if id_:\n                final_attrs = {**final_attrs, 'id': '%s_%s' % (id_, i)}\n            context['widget']['subwidgets'].append(\n                self.widget.get_context(name + '_%s' % i, widget_value, final_attrs)['widget']\n            )\"\"\"\nnew = \"\"\"        final_attrs = self.build_attrs(attrs)\n        id_ = final_attrs.get('id')\n        base_final_attrs = final_attrs\n        for i in range(max(len(value), self.size)):\n            try:\n                widget_value = value[i]\n            except IndexError:\n                widget_value = None\n            if id_:\n                widget_attrs = {**base_final_attrs, 'id': '%s_%s' % (id_, i)}\n            else:\n                widget_attrs = dict(base_final_attrs)\n            context['widget']['subwidgets'].append(\n                self.widget.get_context(name + '_%s' % i, widget_value, widget_attrs)['widget']\n            )\"\"\"\nif old in s:\n    s = s.replace(old, new)\n    p.write_text(s)\n    print(\"Patched django/contrib/postgres/forms/array.py\")\nelse:\n    print(\"Pattern not found; no changes made\")\nPY\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nOWT0DjOggP6pcsT4m19DoCTxyt",
+          "created": 1771227196,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The bug is caused by reusing the same attrs dict (final_attrs) across iterations in SplitArrayWidget.get_context. CheckboxInput.get_context mutates the attrs dict (setting 'checked'), so once one checkbox sets 'checked' True, subsequent widgets inherit it. To fix, create a fresh attrs dict for each subwidget instead of reassigning final_attrs. I'll modify django/contrib/postgres/forms/array.py to compute a base_final_attrs and then build a new widget_attrs per iteration (copying base_final_attrs and adding the id if present), and pass that to each widget.get_context call.\n\n```bash\npython - <<'PY'\nfrom pathlib import Path\np = Path('django/contrib/postgres/forms/array.py')\ns = p.read_text()\nold = \"\"\"        final_attrs = self.build_attrs(attrs)\n        id_ = final_attrs.get('id')\n        for i in range(max(len(value), self.size)):\n            try:\n                widget_value = value[i]\n            except IndexError:\n                widget_value = None\n            if id_:\n                final_attrs = {**final_attrs, 'id': '%s_%s' % (id_, i)}\n            context['widget']['subwidgets'].append(\n                self.widget.get_context(name + '_%s' % i, widget_value, final_attrs)['widget']\n            )\"\"\"\nnew = \"\"\"        final_attrs = self.build_attrs(attrs)\n        id_ = final_attrs.get('id')\n        base_final_attrs = final_attrs\n        for i in range(max(len(value), self.size)):\n            try:\n                widget_value = value[i]\n            except IndexError:\n                widget_value = None\n            if id_:\n                widget_attrs = {**base_final_attrs, 'id': '%s_%s' % (id_, i)}\n            else:\n                widget_attrs = dict(base_final_attrs)\n            context['widget']['subwidgets'].append(\n                self.widget.get_context(name + '_%s' % i, widget_value, widget_attrs)['widget']\n            )\"\"\"\nif old in s:\n    s = s.replace(old, new)\n    p.write_text(s)\n    print(\"Patched django/contrib/postgres/forms/array.py\")\nelse:\n    print(\"Pattern not found; no changes made\")\nPY\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 1373,
+            "prompt_tokens": 5997,
+            "total_tokens": 7370,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 896,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 3456,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nPatched django/contrib/postgres/forms/array.py\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I patched SplitArrayWidget.get_context to avoid reusing and mutating the same attrs dict across subwidgets (now creating a fresh widget_attrs per iteration). I'll run the relevant tests for the postgres array widget and checkbox input widget to verify the fix didn't break behavior and that the checkbox checked state no longer leaks between subwidgets.\n\n```bash\npython -m pytest -q tests/postgres_tests/test_array.py::SplitArrayWidgetTests tests/forms_tests/widget_tests/test_checkboxinput.py -q\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nOjDb96XUMwQmtaR31VqPhYoGyS",
+          "created": 1771227209,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I patched SplitArrayWidget.get_context to avoid reusing and mutating the same attrs dict across subwidgets (now creating a fresh widget_attrs per iteration). I'll run the relevant tests for the postgres array widget and checkbox input widget to verify the fix didn't break behavior and that the checkbox checked state no longer leaks between subwidgets.\n\n```bash\npython -m pytest -q tests/postgres_tests/test_array.py::SplitArrayWidgetTests tests/forms_tests/widget_tests/test_checkboxinput.py -q\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 240,
+            "prompt_tokens": 6502,
+            "total_tokens": 6742,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 128,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5888,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>1</returncode>\n<output>\n/opt/miniconda3/envs/testbed/bin/python: No module named pytest\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I need to verify the fix by constructing a SplitArrayWidget using CheckboxInput and calling get_context with initial values that include a True followed by False values. The script will print whether each subwidget's attrs contains 'checked' to ensure the 'checked' attribute does not leak to subsequent widgets. I'll run a small Python script to create the widget, call get_context with an 'id' in attrs and without attrs, and display the 'checked' state for each subwidget.\n\n```bash\ncat > test_check.py <<'PY'\nfrom django.contrib.postgres.forms.array import SplitArrayWidget\nfrom django import forms\ndef check(values, attrs):\n    widget = SplitArrayWidget(forms.CheckboxInput(), size=4)\n    ctx = widget.get_context('field', values, attrs)\n    print(\"Attrs passed:\", attrs)\n    for i, sw in enumerate(ctx['widget']['subwidgets']):\n        a = sw.get('attrs', {})\n        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\nprint(\"With id attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], {'id': 'fld'})\nprint(\"\\nWith no attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], None)\nPY\npython test_check.py\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nOmwGMCgc5LpzACE3Aiwy169qRa",
+          "created": 1771227212,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I need to verify the fix by constructing a SplitArrayWidget using CheckboxInput and calling get_context with initial values that include a True followed by False values. The script will print whether each subwidget's attrs contains 'checked' to ensure the 'checked' attribute does not leak to subsequent widgets. I'll run a small Python script to create the widget, call get_context with an 'id' in attrs and without attrs, and display the 'checked' state for each subwidget.\n\n```bash\ncat > test_check.py <<'PY'\nfrom django.contrib.postgres.forms.array import SplitArrayWidget\nfrom django import forms\ndef check(values, attrs):\n    widget = SplitArrayWidget(forms.CheckboxInput(), size=4)\n    ctx = widget.get_context('field', values, attrs)\n    print(\"Attrs passed:\", attrs)\n    for i, sw in enumerate(ctx['widget']['subwidgets']):\n        a = sw.get('attrs', {})\n        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\nprint(\"With id attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], {'id': 'fld'})\nprint(\"\\nWith no attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], None)\nPY\npython test_check.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 805,
+            "prompt_tokens": 6648,
+            "total_tokens": 7453,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 512,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>1</returncode>\n<output>\nTraceback (most recent call last):\n  File \"test_check.py\", line 1, in <module>\n    from django.contrib.postgres.forms.array import SplitArrayWidget\n  File \"/testbed/django/contrib/postgres/forms/__init__.py\", line 4, in <module>\n    from .ranges import *  # NOQA\n  File \"/testbed/django/contrib/postgres/forms/ranges.py\", line 1, in <module>\n    from psycopg2.extras import DateRange, DateTimeTZRange, NumericRange\nModuleNotFoundError: No module named 'psycopg2'\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The previous import failed because importing django.contrib.postgres.forms triggered its package __init__ which imports psycopg2. To avoid that, I'll load the array.py module directly from its file path using importlib, so we don't run the package __init__. Then I'll create a SplitArrayWidget with CheckboxInput and call get_context to inspect each subwidget's attrs to ensure 'checked' doesn't leak after the first True.\n\n```bash\ncat > test_check2.py <<'PY'\nimport importlib.util\nfrom pathlib import Path\n# Load the array.py module directly to avoid importing the package __init__ (which requires psycopg2)\nspec = importlib.util.spec_from_file_location(\"pg_array\", Path(\"django/contrib/postgres/forms/array.py\"))\npg_array = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(pg_array)\n\nfrom django import forms\n\ndef check(values, attrs):\n    widget = pg_array.SplitArrayWidget(forms.CheckboxInput(), size=4)\n    ctx = widget.get_context('field', values, attrs)\n    print(\"Attrs passed:\", attrs)\n    for i, sw in enumerate(ctx['widget']['subwidgets']):\n        a = sw.get('attrs', {})\n        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n\nprint(\"With id attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], {'id': 'fld'})\nprint(\"\\nWith no attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], None)\nPY\npython test_check2.py\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nOvjSYyRy2RwsiLfXQ7COTFIrqe",
+          "created": 1771227221,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The previous import failed because importing django.contrib.postgres.forms triggered its package __init__ which imports psycopg2. To avoid that, I'll load the array.py module directly from its file path using importlib, so we don't run the package __init__. Then I'll create a SplitArrayWidget with CheckboxInput and call get_context to inspect each subwidget's attrs to ensure 'checked' doesn't leak after the first True.\n\n```bash\ncat > test_check2.py <<'PY'\nimport importlib.util\nfrom pathlib import Path\n# Load the array.py module directly to avoid importing the package __init__ (which requires psycopg2)\nspec = importlib.util.spec_from_file_location(\"pg_array\", Path(\"django/contrib/postgres/forms/array.py\"))\npg_array = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(pg_array)\n\nfrom django import forms\n\ndef check(values, attrs):\n    widget = pg_array.SplitArrayWidget(forms.CheckboxInput(), size=4)\n    ctx = widget.get_context('field', values, attrs)\n    print(\"Attrs passed:\", attrs)\n    for i, sw in enumerate(ctx['widget']['subwidgets']):\n        a = sw.get('attrs', {})\n        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n\nprint(\"With id attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], {'id': 'fld'})\nprint(\"\\nWith no attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], None)\nPY\npython test_check2.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 926,
+            "prompt_tokens": 7088,
+            "total_tokens": 8014,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 576,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5888,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>1</returncode>\n<output>\nTraceback (most recent call last):\n  File \"test_check2.py\", line 6, in <module>\n    spec.loader.exec_module(pg_array)\n  File \"<frozen importlib._bootstrap_external>\", line 678, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 219, in _call_with_frames_removed\n  File \"django/contrib/postgres/forms/array.py\", line 11, in <module>\n    from ..utils import prefix_validation_error\nImportError: attempted relative import with no known parent package\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The previous direct import failed due to relative imports expecting the module to be part of the django.contrib.postgres.forms package. I'll create a small Python runner that injects package placeholders for django.contrib, django.contrib.postgres, and django.contrib.postgres.forms into sys.modules with appropriate __path__, then load array.py using importlib.util.spec_from_file_location with the full package name so relative imports work. Then I'll instantiate SplitArrayWidget with CheckboxInput and print each subwidget's attrs to confirm the 'checked' attribute does not leak.\n\n```bash\ncat > test_check3.py <<'PY'\nimport sys, types, importlib.util\nfrom pathlib import Path\n\n# Ensure top-level django package is importable from project (it is in cwd)\n# Create package placeholders for django.contrib, django.contrib.postgres, and django.contrib.postgres.forms\ndef ensure_pkg(name, path):\n    if name in sys.modules:\n        return sys.modules[name]\n    mod = types.ModuleType(name)\n    mod.__path__ = [str(path)]\n    sys.modules[name] = mod\n    # set attribute on parent package if parent exists\n    parent = name.rpartition('.')[0]\n    if parent and parent in sys.modules:\n        setattr(sys.modules[parent], name.rpartition('.')[2], mod)\n    return mod\n\nbase = Path('django/contrib/postgres').resolve()\nforms_path = base / 'forms'\nensure_pkg('django.contrib', Path('django/contrib').resolve())\nensure_pkg('django.contrib.postgres', base)\nensure_pkg('django.contrib.postgres.forms', forms_path)\n\nspec = importlib.util.spec_from_file_location('django.contrib.postgres.forms.array', str(forms_path / 'array.py'))\nmodule = importlib.util.module_from_spec(spec)\nsys.modules[spec.name] = module\nspec.loader.exec_module(module)\n\nfrom django import forms\n\ndef check(values, attrs):\n    widget = module.SplitArrayWidget(forms.CheckboxInput(), size=4)\n    ctx = widget.get_context('field', values, attrs)\n    print(\"Attrs passed:\", attrs)\n    for i, sw in enumerate(ctx['widget']['subwidgets']):\n        a = sw.get('attrs', {})\n        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n\nprint(\"With id attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], {'id': 'fld'})\nprint(\"\\nWith no attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], None)\nPY\npython test_check3.py\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nP3Q7IRTWLBoj9Z8arIWYC976BX",
+          "created": 1771227229,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The previous direct import failed due to relative imports expecting the module to be part of the django.contrib.postgres.forms package. I'll create a small Python runner that injects package placeholders for django.contrib, django.contrib.postgres, and django.contrib.postgres.forms into sys.modules with appropriate __path__, then load array.py using importlib.util.spec_from_file_location with the full package name so relative imports work. Then I'll instantiate SplitArrayWidget with CheckboxInput and print each subwidget's attrs to confirm the 'checked' attribute does not leak.\n\n```bash\ncat > test_check3.py <<'PY'\nimport sys, types, importlib.util\nfrom pathlib import Path\n\n# Ensure top-level django package is importable from project (it is in cwd)\n# Create package placeholders for django.contrib, django.contrib.postgres, and django.contrib.postgres.forms\ndef ensure_pkg(name, path):\n    if name in sys.modules:\n        return sys.modules[name]\n    mod = types.ModuleType(name)\n    mod.__path__ = [str(path)]\n    sys.modules[name] = mod\n    # set attribute on parent package if parent exists\n    parent = name.rpartition('.')[0]\n    if parent and parent in sys.modules:\n        setattr(sys.modules[parent], name.rpartition('.')[2], mod)\n    return mod\n\nbase = Path('django/contrib/postgres').resolve()\nforms_path = base / 'forms'\nensure_pkg('django.contrib', Path('django/contrib').resolve())\nensure_pkg('django.contrib.postgres', base)\nensure_pkg('django.contrib.postgres.forms', forms_path)\n\nspec = importlib.util.spec_from_file_location('django.contrib.postgres.forms.array', str(forms_path / 'array.py'))\nmodule = importlib.util.module_from_spec(spec)\nsys.modules[spec.name] = module\nspec.loader.exec_module(module)\n\nfrom django import forms\n\ndef check(values, attrs):\n    widget = module.SplitArrayWidget(forms.CheckboxInput(), size=4)\n    ctx = widget.get_context('field', values, attrs)\n    print(\"Attrs passed:\", attrs)\n    for i, sw in enumerate(ctx['widget']['subwidgets']):\n        a = sw.get('attrs', {})\n        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n\nprint(\"With id attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], {'id': 'fld'})\nprint(\"\\nWith no attrs and values [True, False, False, False]:\")\ncheck([True, False, False, False], None)\nPY\npython test_check3.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 1633,
+            "prompt_tokens": 7568,
+            "total_tokens": 9201,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 1088,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nWith id attrs and values [True, False, False, False]:\nAttrs passed: {'id': 'fld'}\n0 checked_in_attrs: True attrs: {'id': 'fld_0', 'checked': True}\n1 checked_in_attrs: None attrs: {'id': 'fld_1'}\n2 checked_in_attrs: None attrs: {'id': 'fld_2'}\n3 checked_in_attrs: None attrs: {'id': 'fld_3'}\n\nWith no attrs and values [True, False, False, False]:\nAttrs passed: None\n0 checked_in_attrs: True attrs: {'checked': True}\n1 checked_in_attrs: None attrs: {}\n2 checked_in_attrs: None attrs: {}\n3 checked_in_attrs: None attrs: {}\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I updated SplitArrayWidget.get_context to avoid reusing a single attrs dict across subwidgets (CheckboxInput.get_context mutates attrs, causing 'checked' to leak). I verified with a targeted script that each subwidget now gets its own attrs dict (the 'checked' attribute no longer persists after the first True). I'll now submit the changes.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nPHBNuMrW6BZiqmXjHRiDMPe8Ga",
+          "created": 1771227243,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I updated SplitArrayWidget.get_context to avoid reusing a single attrs dict across subwidgets (CheckboxInput.get_context mutates attrs, causing 'checked' to leak). I verified with a targeted script that each subwidget now gets its own attrs dict (the 'checked' attribute no longer persists after the first True). I'll now submit the changes.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 234,
+            "prompt_tokens": 8280,
+            "total_tokens": 8514,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 128,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 6912,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "diff --git a/django/contrib/postgres/forms/array.py b/django/contrib/postgres/forms/array.py\nindex 2e19cd574a..cf6b762d47 100644\n--- a/django/contrib/postgres/forms/array.py\n+++ b/django/contrib/postgres/forms/array.py\n@@ -139,15 +139,18 @@ class SplitArrayWidget(forms.Widget):\n         context['widget']['subwidgets'] = []\n         final_attrs = self.build_attrs(attrs)\n         id_ = final_attrs.get('id')\n+        base_final_attrs = final_attrs\n         for i in range(max(len(value), self.size)):\n             try:\n                 widget_value = value[i]\n             except IndexError:\n                 widget_value = None\n             if id_:\n-                final_attrs = {**final_attrs, 'id': '%s_%s' % (id_, i)}\n+                widget_attrs = {**base_final_attrs, 'id': '%s_%s' % (id_, i)}\n+            else:\n+                widget_attrs = dict(base_final_attrs)\n             context['widget']['subwidgets'].append(\n-                self.widget.get_context(name + '_%s' % i, widget_value, final_attrs)['widget']\n+                self.widget.get_context(name + '_%s' % i, widget_value, widget_attrs)['widget']\n             )\n         return context\n \ndiff --git a/test_check.py b/test_check.py\nnew file mode 100644\nindex 0000000000..55cc04c7a2\n--- /dev/null\n+++ b/test_check.py\n@@ -0,0 +1,13 @@\n+from django.contrib.postgres.forms.array import SplitArrayWidget\n+from django import forms\n+def check(values, attrs):\n+    widget = SplitArrayWidget(forms.CheckboxInput(), size=4)\n+    ctx = widget.get_context('field', values, attrs)\n+    print(\"Attrs passed:\", attrs)\n+    for i, sw in enumerate(ctx['widget']['subwidgets']):\n+        a = sw.get('attrs', {})\n+        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n+print(\"With id attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], {'id': 'fld'})\n+print(\"\\nWith no attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], None)\ndiff --git a/test_check2.py b/test_check2.py\nnew file mode 100644\nindex 0000000000..c665ab00c4\n--- /dev/null\n+++ b/test_check2.py\n@@ -0,0 +1,21 @@\n+import importlib.util\n+from pathlib import Path\n+# Load the array.py module directly to avoid importing the package __init__ (which requires psycopg2)\n+spec = importlib.util.spec_from_file_location(\"pg_array\", Path(\"django/contrib/postgres/forms/array.py\"))\n+pg_array = importlib.util.module_from_spec(spec)\n+spec.loader.exec_module(pg_array)\n+\n+from django import forms\n+\n+def check(values, attrs):\n+    widget = pg_array.SplitArrayWidget(forms.CheckboxInput(), size=4)\n+    ctx = widget.get_context('field', values, attrs)\n+    print(\"Attrs passed:\", attrs)\n+    for i, sw in enumerate(ctx['widget']['subwidgets']):\n+        a = sw.get('attrs', {})\n+        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n+\n+print(\"With id attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], {'id': 'fld'})\n+print(\"\\nWith no attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], None)\ndiff --git a/test_check3.py b/test_check3.py\nnew file mode 100644\nindex 0000000000..98e5647f9a\n--- /dev/null\n+++ b/test_check3.py\n@@ -0,0 +1,42 @@\n+import sys, types, importlib.util\n+from pathlib import Path\n+\n+# Ensure top-level django package is importable from project (it is in cwd)\n+# Create package placeholders for django.contrib, django.contrib.postgres, and django.contrib.postgres.forms\n+def ensure_pkg(name, path):\n+    if name in sys.modules:\n+        return sys.modules[name]\n+    mod = types.ModuleType(name)\n+    mod.__path__ = [str(path)]\n+    sys.modules[name] = mod\n+    # set attribute on parent package if parent exists\n+    parent = name.rpartition('.')[0]\n+    if parent and parent in sys.modules:\n+        setattr(sys.modules[parent], name.rpartition('.')[2], mod)\n+    return mod\n+\n+base = Path('django/contrib/postgres').resolve()\n+forms_path = base / 'forms'\n+ensure_pkg('django.contrib', Path('django/contrib').resolve())\n+ensure_pkg('django.contrib.postgres', base)\n+ensure_pkg('django.contrib.postgres.forms', forms_path)\n+\n+spec = importlib.util.spec_from_file_location('django.contrib.postgres.forms.array', str(forms_path / 'array.py'))\n+module = importlib.util.module_from_spec(spec)\n+sys.modules[spec.name] = module\n+spec.loader.exec_module(module)\n+\n+from django import forms\n+\n+def check(values, attrs):\n+    widget = module.SplitArrayWidget(forms.CheckboxInput(), size=4)\n+    ctx = widget.get_context('field', values, attrs)\n+    print(\"Attrs passed:\", attrs)\n+    for i, sw in enumerate(ctx['widget']['subwidgets']):\n+        a = sw.get('attrs', {})\n+        print(i, \"checked_in_attrs:\", a.get('checked'), \"attrs:\", a)\n+\n+print(\"With id attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], {'id': 'fld'})\n+print(\"\\nWith no attrs and values [True, False, False, False]:\")\n+check([True, False, False, False], None)\n"
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1",
+  "instance_id": "django__django-12193"
+}

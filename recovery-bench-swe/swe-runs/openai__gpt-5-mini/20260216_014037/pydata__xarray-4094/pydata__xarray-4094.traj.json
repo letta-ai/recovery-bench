@@ -1,0 +1,565 @@
+{
+  "info": {
+    "exit_status": "Submitted",
+    "submission": "diff --git a/xarray/core/dataarray.py b/xarray/core/dataarray.py\nindex b0df8749..00f3d6f3 100644\n--- a/xarray/core/dataarray.py\n+++ b/xarray/core/dataarray.py\n@@ -1959,12 +1959,20 @@ class DataArray(AbstractArray, DataWithCoords):\n         variable_dim = idx.names[level_number]\n \n         # pull variables out of datarray\n-        data_dict = {}\n+        variables_dict = {}\n         for k in variables:\n-            data_dict[k] = self.sel({variable_dim: k}).squeeze(drop=True)\n+            arr = self.sel({variable_dim: k}).squeeze(drop=True)\n+            # clear attrs to match DataArray._to_dataset_split behavior\n+            arr.attrs = {}\n+            # convert to a Variable (no attached coords) to avoid merge conflicts\n+            variables_dict[k] = as_variable(arr)\n \n-        # unstacked dataset\n-        return Dataset(data_dict)\n+        # unstacked dataset (construct directly to control coords/indexes)\n+        indexes = propagate_indexes(self._indexes, exclude=dim)\n+        coord_names = set(self._coords) - set([dim])\n+        return Dataset._construct_direct(\n+            variables_dict, coord_names, indexes=indexes, attrs=self.attrs\n+        )\n \n     def transpose(self, *dims: Hashable, transpose_coords: bool = True) -> \"DataArray\":\n         \"\"\"Return a new DataArray object with transposed dimensions.\n",
+    "model_stats": {
+      "instance_cost": 0.0186131,
+      "api_calls": 10
+    },
+    "mini_version": "1.14.4",
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).\n\nInclude a THOUGHT section before your command where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE bash command to execute\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. A single bash code block with your command\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE bash code block\n- This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>\n",
+        "timeout_template": "The last command <command>{{action['action']}}</command> timed out and has been killed.\nThe output of the command was:\n <output>\n{{output}}\n</output>\nPlease try another command and make sure to avoid those requiring interactive input.",
+        "format_error_template": "Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.\n\nPlease format your action in triple backticks as shown in <response_example>.\n\n<response_example>\nHere are some thoughts about why you want to perform the action.\n\n```bash\n<action>\n```\n</response_example>\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n",
+        "action_observation_template": "<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "step_limit": 250,
+        "cost_limit": 3.0
+      },
+      "model": {
+        "model_name": "openai/gpt-5-mini",
+        "model_kwargs": {
+          "drop_params": true,
+          "temperature": 0.0
+        },
+        "litellm_model_registry": null,
+        "set_cache_control": null
+      },
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.pydata_1776_xarray-4094:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 120
+      },
+      "agent_type": "minisweagent.run.extra.swebench.ProgressTrackingAgent",
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    }
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).\n\nInclude a THOUGHT section before your command where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nto_unstacked_dataset broken for single-dim variables\n<!-- A short summary of the issue, if appropriate -->\r\n\r\n\r\n#### MCVE Code Sample\r\n\r\n```python\r\narr = xr.DataArray(\r\n     np.arange(3),\r\n     coords=[(\"x\", [0, 1, 2])],\r\n )\r\ndata = xr.Dataset({\"a\": arr, \"b\": arr})\r\nstacked = data.to_stacked_array('y', sample_dims=['x'])\r\nunstacked = stacked.to_unstacked_dataset('y')\r\n# MergeError: conflicting values for variable 'y' on objects to be combined. You can skip this check by specifying compat='override'.\r\n```\r\n\r\n#### Expected Output\r\nA working roundtrip.\r\n\r\n#### Problem Description\r\nI need to stack a bunch of variables and later unstack them again, however this doesn't work if the variables only have a single dimension.\r\n\r\n#### Versions\r\n\r\n<details><summary>Output of <tt>xr.show_versions()</tt></summary>\r\n\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.7.3 (default, Mar 27 2019, 22:11:17) \r\n[GCC 7.3.0]\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 4.15.0-96-generic\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_GB.UTF-8\r\nLOCALE: en_GB.UTF-8\r\nlibhdf5: 1.10.4\r\nlibnetcdf: 4.6.2\r\n\r\nxarray: 0.15.1\r\npandas: 1.0.3\r\nnumpy: 1.17.3\r\nscipy: 1.3.1\r\nnetCDF4: 1.4.2\r\npydap: None\r\nh5netcdf: None\r\nh5py: 2.10.0\r\nNio: None\r\nzarr: None\r\ncftime: 1.0.4.2\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: None\r\ncfgrib: None\r\niris: None\r\nbottleneck: None\r\ndask: 2.10.1\r\ndistributed: 2.10.0\r\nmatplotlib: 3.1.1\r\ncartopy: None\r\nseaborn: 0.10.0\r\nnumbagg: None\r\nsetuptools: 41.0.0\r\npip: 19.0.3\r\nconda: 4.8.3\r\npytest: 5.3.5\r\nIPython: 7.9.0\r\nsphinx: None\r\n\r\n\r\n</details>\r\n\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE bash command to execute\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. A single bash code block with your command\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE bash code block\n- This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll list the files in the repository to find the source files under /testbed and understand the project structure before making changes.\n\n```bash\nls -la\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9ntp0nChFwObeCMxKLaYHamZSz6x",
+          "created": 1771229137,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll list the files in the repository to find the source files under /testbed and understand the project structure before making changes.\n\n```bash\nls -la\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 46,
+            "prompt_tokens": 1771,
+            "total_tokens": 1817,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ntotal 157\ndrwxrwxrwx 1 root root    33 Sep 10 15:03 .\ndrwxr-xr-x 1 root root     3 Feb 16 08:05 ..\ndrwxrwxrwx 2 root root     3 Sep 10 15:02 .binder\n-rw-r--r-- 1 root root   297 Sep 10 15:02 .codecov.yml\n-rw-r--r-- 1 root root   153 Sep 10 15:02 .coveragerc\n-rw-r--r-- 1 root root   212 Sep 10 15:02 .deepsource.toml\ndrwxr-xr-x 3 root root     4 Sep 10 15:03 .eggs\ndrwxrwxrwx 8 root root    15 Sep 10 15:03 .git\n-rw-r--r-- 1 root root    69 Sep 10 15:02 .gitattributes\ndrwxrwxrwx 3 root root     6 Sep 10 15:02 .github\n-rw-r--r-- 1 root root   738 Sep 10 15:02 .gitignore\n-rw-r--r-- 1 root root   220 Sep 10 15:02 .landscape.yml\n-rw-r--r-- 1 root root   163 Sep 10 15:02 .pep8speaks.yml\n-rw-r--r-- 1 root root  1009 Sep 10 15:02 .pre-commit-config.yaml\n-rw-r--r-- 1 root root  3230 Sep 10 15:02 CODE_OF_CONDUCT.md\n-rw-r--r-- 1 root root   129 Sep 10 15:02 CONTRIBUTING.md\n-rw-r--r-- 1 root root  4427 Sep 10 15:02 HOW_TO_RELEASE.md\n-rw-r--r-- 1 root root 10273 Sep 10 15:02 LICENSE\n-rw-r--r-- 1 root root   165 Sep 10 15:02 MANIFEST.in\n-rw-r--r-- 1 root root  5977 Sep 10 15:02 README.rst\ndrwxrwxrwx 3 root root     4 Sep 10 15:02 asv_bench\n-rw-r--r-- 1 root root  2357 Sep 10 15:02 azure-pipelines.yml\ndrwxrwxrwx 4 root root     5 Sep 10 15:02 ci\n-rw-r--r-- 1 root root  1042 Sep 10 15:02 conftest.py\ndrwxrwxrwx 6 root root    37 Sep 10 15:02 doc\ndrwxrwxrwx 2 root root     8 Sep 10 15:02 licenses\ndrwxrwxrwx 2 root root     6 Sep 10 15:02 properties\n-rw-r--r-- 1 root root    99 Sep 10 15:02 readthedocs.yml\n-rw-r--r-- 1 root root   280 Sep 10 15:02 requirements.txt\n-rw-r--r-- 1 root root  6338 Sep 10 15:02 setup.cfg\n-rwxr-xr-x 1 root root    80 Sep 10 15:02 setup.py\ndrwxrwxrwx 9 root root    16 Sep 10 15:02 xarray\ndrwxr-xr-x 2 root root     8 Sep 10 15:03 xarray.egg-info\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll search the repository for references to \"to_unstacked_dataset\" to find the implementation that needs fixing and locate related code to change.\n\n```bash\ngrep -R \"to_unstacked_dataset\" -n\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9ntrgJQTbYiYkldlT1T4ZwwIJIsu",
+          "created": 1771229139,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll search the repository for references to \"to_unstacked_dataset\" to find the implementation that needs fixing and locate related code to change.\n\n```bash\ngrep -R \"to_unstacked_dataset\" -n\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 122,
+            "prompt_tokens": 2636,
+            "total_tokens": 2758,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 64,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ndoc/api.rst:539:   DataArray.to_unstacked_dataset\ndoc/whats-new.rst:983:  :py:meth:`DataArray.to_unstacked_dataset` for reshaping Datasets of variables\ndoc/reshaping.rst:164::py:meth:`xarray.DataArray.to_unstacked_dataset` reverses this operation.\ndoc/reshaping.rst:178:    unstacked = stacked.to_unstacked_dataset(\"z\")\nxarray/core/dataarray.py:1901:    def to_unstacked_dataset(self, dim, level=0):\nxarray/core/dataarray.py:1944:        >>> roundtripped = stacked.to_unstacked_dataset(dim=\"z\")\nxarray/core/dataset.py:3410:        DataArray.to_unstacked_dataset\nxarray/tests/test_units.py:3481:    def test_to_unstacked_dataset(self, dtype):\nxarray/tests/test_units.py:3493:        func = method(\"to_unstacked_dataset\", dim=\"z\")\nxarray/tests/test_dataarray.py:2132:    def test_to_unstacked_dataset_raises_value_error(self):\nxarray/tests/test_dataarray.py:2135:            data.to_unstacked_dataset(\"x\", 0)\nxarray/tests/test_dataset.py:3033:    def test_to_stacked_array_to_unstacked_dataset(self):\nxarray/tests/test_dataset.py:3040:        x = y.to_unstacked_dataset(\"features\")\nxarray/tests/test_dataset.py:3044:        x0 = y[0].to_unstacked_dataset(\"features\")\nxarray/tests/test_dataset.py:3048:    def test_to_stacked_array_to_unstacked_dataset_different_dimension(self):\nxarray/tests/test_dataset.py:3055:        x = y.to_unstacked_dataset(\"features\")\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll open the dataarray and dataset source files to inspect the to_unstacked_dataset implementations and pinpoint where single-dimension variables might cause the MergeError.\n\n```bash\nnl -ba xarray/core/dataarray.py | sed -n '1860,1980p'\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9ntuIPp6aIfqfUHvPLbjUvJX8L8T",
+          "created": 1771229142,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll open the dataarray and dataset source files to inspect the to_unstacked_dataset implementations and pinpoint where single-dimension variables might cause the MergeError.\n\n```bash\nnl -ba xarray/core/dataarray.py | sed -n '1860,1980p'\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 69,
+            "prompt_tokens": 3096,
+            "total_tokens": 3165,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n  1860\t        dim : hashable or sequence of hashable, optional\n  1861\t            Dimension(s) over which to unstack. By default unstacks all\n  1862\t            MultiIndexes.\n  1863\t        fill_value: value to be filled. By default, np.nan\n  1864\t        sparse: use sparse-array if True\n  1865\t\n  1866\t        Returns\n  1867\t        -------\n  1868\t        unstacked : DataArray\n  1869\t            Array with unstacked data.\n  1870\t\n  1871\t        Examples\n  1872\t        --------\n  1873\t\n  1874\t        >>> arr = xr.DataArray(\n  1875\t        ...     np.arange(6).reshape(2, 3),\n  1876\t        ...     coords=[(\"x\", [\"a\", \"b\"]), (\"y\", [0, 1, 2])],\n  1877\t        ... )\n  1878\t        >>> arr\n  1879\t        <xarray.DataArray (x: 2, y: 3)>\n  1880\t        array([[0, 1, 2],\n  1881\t               [3, 4, 5]])\n  1882\t        Coordinates:\n  1883\t          * x        (x) |S1 'a' 'b'\n  1884\t          * y        (y) int64 0 1 2\n  1885\t        >>> stacked = arr.stack(z=(\"x\", \"y\"))\n  1886\t        >>> stacked.indexes[\"z\"]\n  1887\t        MultiIndex(levels=[['a', 'b'], [0, 1, 2]],\n  1888\t                   codes=[[0, 0, 0, 1, 1, 1], [0, 1, 2, 0, 1, 2]],\n  1889\t                   names=['x', 'y'])\n  1890\t        >>> roundtripped = stacked.unstack()\n  1891\t        >>> arr.identical(roundtripped)\n  1892\t        True\n  1893\t\n  1894\t        See Also\n  1895\t        --------\n  1896\t        DataArray.stack\n  1897\t        \"\"\"\n  1898\t        ds = self._to_temp_dataset().unstack(dim, fill_value, sparse)\n  1899\t        return self._from_temp_dataset(ds)\n  1900\t\n  1901\t    def to_unstacked_dataset(self, dim, level=0):\n  1902\t        \"\"\"Unstack DataArray expanding to Dataset along a given level of a\n  1903\t        stacked coordinate.\n  1904\t\n  1905\t        This is the inverse operation of Dataset.to_stacked_array.\n  1906\t\n  1907\t        Parameters\n  1908\t        ----------\n  1909\t        dim : str\n  1910\t            Name of existing dimension to unstack\n  1911\t        level : int or str\n  1912\t            The MultiIndex level to expand to a dataset along. Can either be\n  1913\t            the integer index of the level or its name.\n  1914\t        label : int, default 0\n  1915\t            Label of the level to expand dataset along. Overrides the label\n  1916\t            argument if given.\n  1917\t\n  1918\t        Returns\n  1919\t        -------\n  1920\t        unstacked: Dataset\n  1921\t\n  1922\t        Examples\n  1923\t        --------\n  1924\t        >>> import xarray as xr\n  1925\t        >>> arr = xr.DataArray(\n  1926\t        ...     np.arange(6).reshape(2, 3),\n  1927\t        ...     coords=[(\"x\", [\"a\", \"b\"]), (\"y\", [0, 1, 2])],\n  1928\t        ... )\n  1929\t        >>> data = xr.Dataset({\"a\": arr, \"b\": arr.isel(y=0)})\n  1930\t        >>> data\n  1931\t        <xarray.Dataset>\n  1932\t        Dimensions:  (x: 2, y: 3)\n  1933\t        Coordinates:\n  1934\t          * x        (x) <U1 'a' 'b'\n  1935\t          * y        (y) int64 0 1 2\n  1936\t        Data variables:\n  1937\t            a        (x, y) int64 0 1 2 3 4 5\n  1938\t            b        (x) int64 0 3\n  1939\t        >>> stacked = data.to_stacked_array(\"z\", [\"y\"])\n  1940\t        >>> stacked.indexes[\"z\"]\n  1941\t        MultiIndex(levels=[['a', 'b'], [0, 1, 2]],\n  1942\t                labels=[[0, 0, 0, 1], [0, 1, 2, -1]],\n  1943\t                names=['variable', 'y'])\n  1944\t        >>> roundtripped = stacked.to_unstacked_dataset(dim=\"z\")\n  1945\t        >>> data.identical(roundtripped)\n  1946\t        True\n  1947\t\n  1948\t        See Also\n  1949\t        --------\n  1950\t        Dataset.to_stacked_array\n  1951\t        \"\"\"\n  1952\t\n  1953\t        idx = self.indexes[dim]\n  1954\t        if not isinstance(idx, pd.MultiIndex):\n  1955\t            raise ValueError(f\"'{dim}' is not a stacked coordinate\")\n  1956\t\n  1957\t        level_number = idx._get_level_number(level)\n  1958\t        variables = idx.levels[level_number]\n  1959\t        variable_dim = idx.names[level_number]\n  1960\t\n  1961\t        # pull variables out of datarray\n  1962\t        data_dict = {}\n  1963\t        for k in variables:\n  1964\t            data_dict[k] = self.sel({variable_dim: k}).squeeze(drop=True)\n  1965\t\n  1966\t        # unstacked dataset\n  1967\t        return Dataset(data_dict)\n  1968\t\n  1969\t    def transpose(self, *dims: Hashable, transpose_coords: bool = True) -> \"DataArray\":\n  1970\t        \"\"\"Return a new DataArray object with transposed dimensions.\n  1971\t\n  1972\t        Parameters\n  1973\t        ----------\n  1974\t        *dims : hashable, optional\n  1975\t            By default, reverse the dimensions. Otherwise, reorder the\n  1976\t            dimensions to this order.\n  1977\t        transpose_coords : boolean, default True\n  1978\t            If True, also transpose the coordinates of this DataArray.\n  1979\t\n  1980\t        Returns\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll open the dataset.to_stacked_array implementation to understand how the stacked DataArray is structured and why unstacking might produce conflicting coordinates, which will inform how to fix to_unstacked_dataset for single-dim variables.\n\n```bash\nnl -ba xarray/core/dataset.py | sed -n '3320,3480p'\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9ntwPGgFspE3MpUbSxZh1vn9zZr6",
+          "created": 1771229144,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll open the dataset.to_stacked_array implementation to understand how the stacked DataArray is structured and why unstacking might produce conflicting coordinates, which will inform how to fix to_unstacked_dataset for single-dim variables.\n\n```bash\nnl -ba xarray/core/dataset.py | sed -n '3320,3480p'\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 275,
+            "prompt_tokens": 4710,
+            "total_tokens": 4985,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 192,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 3072,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n  3320\t        levels = [self.get_index(dim) for dim in dims]\n  3321\t        idx = utils.multiindex_from_product_levels(levels, names=dims)\n  3322\t        variables[new_dim] = IndexVariable(new_dim, idx)\n  3323\t\n  3324\t        coord_names = set(self._coord_names) - set(dims) | {new_dim}\n  3325\t\n  3326\t        indexes = {k: v for k, v in self.indexes.items() if k not in dims}\n  3327\t        indexes[new_dim] = idx\n  3328\t\n  3329\t        return self._replace_with_new_dims(\n  3330\t            variables, coord_names=coord_names, indexes=indexes\n  3331\t        )\n  3332\t\n  3333\t    def stack(\n  3334\t        self,\n  3335\t        dimensions: Mapping[Hashable, Sequence[Hashable]] = None,\n  3336\t        **dimensions_kwargs: Sequence[Hashable],\n  3337\t    ) -> \"Dataset\":\n  3338\t        \"\"\"\n  3339\t        Stack any number of existing dimensions into a single new dimension.\n  3340\t\n  3341\t        New dimensions will be added at the end, and the corresponding\n  3342\t        coordinate variables will be combined into a MultiIndex.\n  3343\t\n  3344\t        Parameters\n  3345\t        ----------\n  3346\t        dimensions : Mapping of the form new_name=(dim1, dim2, ...)\n  3347\t            Names of new dimensions, and the existing dimensions that they\n  3348\t            replace. An ellipsis (`...`) will be replaced by all unlisted dimensions.\n  3349\t            Passing a list containing an ellipsis (`stacked_dim=[...]`) will stack over\n  3350\t            all dimensions.\n  3351\t        **dimensions_kwargs:\n  3352\t            The keyword arguments form of ``dimensions``.\n  3353\t            One of dimensions or dimensions_kwargs must be provided.\n  3354\t\n  3355\t        Returns\n  3356\t        -------\n  3357\t        stacked : Dataset\n  3358\t            Dataset with stacked data.\n  3359\t\n  3360\t        See also\n  3361\t        --------\n  3362\t        Dataset.unstack\n  3363\t        \"\"\"\n  3364\t        dimensions = either_dict_or_kwargs(dimensions, dimensions_kwargs, \"stack\")\n  3365\t        result = self\n  3366\t        for new_dim, dims in dimensions.items():\n  3367\t            result = result._stack_once(dims, new_dim)\n  3368\t        return result\n  3369\t\n  3370\t    def to_stacked_array(\n  3371\t        self,\n  3372\t        new_dim: Hashable,\n  3373\t        sample_dims: Sequence[Hashable],\n  3374\t        variable_dim: str = \"variable\",\n  3375\t        name: Hashable = None,\n  3376\t    ) -> \"DataArray\":\n  3377\t        \"\"\"Combine variables of differing dimensionality into a DataArray\n  3378\t        without broadcasting.\n  3379\t\n  3380\t        This method is similar to Dataset.to_array but does not broadcast the\n  3381\t        variables.\n  3382\t\n  3383\t        Parameters\n  3384\t        ----------\n  3385\t        new_dim : Hashable\n  3386\t            Name of the new stacked coordinate\n  3387\t        sample_dims : Sequence[Hashable]\n  3388\t            Dimensions that **will not** be stacked. Each array in the dataset\n  3389\t            must share these dimensions. For machine learning applications,\n  3390\t            these define the dimensions over which samples are drawn.\n  3391\t        variable_dim : str, optional\n  3392\t            Name of the level in the stacked coordinate which corresponds to\n  3393\t            the variables.\n  3394\t        name : str, optional\n  3395\t            Name of the new data array.\n  3396\t\n  3397\t        Returns\n  3398\t        -------\n  3399\t        stacked : DataArray\n  3400\t            DataArray with the specified dimensions and data variables\n  3401\t            stacked together. The stacked coordinate is named ``new_dim``\n  3402\t            and represented by a MultiIndex object with a level containing the\n  3403\t            data variable names. The name of this level is controlled using\n  3404\t            the ``variable_dim`` argument.\n  3405\t\n  3406\t        See Also\n  3407\t        --------\n  3408\t        Dataset.to_array\n  3409\t        Dataset.stack\n  3410\t        DataArray.to_unstacked_dataset\n  3411\t\n  3412\t        Examples\n  3413\t        --------\n  3414\t        >>> data = xr.Dataset(\n  3415\t        ...     data_vars={\n  3416\t        ...         \"a\": ((\"x\", \"y\"), [[0, 1, 2], [3, 4, 5]]),\n  3417\t        ...         \"b\": (\"x\", [6, 7]),\n  3418\t        ...     },\n  3419\t        ...     coords={\"y\": [\"u\", \"v\", \"w\"]},\n  3420\t        ... )\n  3421\t\n  3422\t        >>> data\n  3423\t        <xarray.Dataset>\n  3424\t        Dimensions:  (x: 2, y: 3)\n  3425\t        Coordinates:\n  3426\t        * y        (y) <U1 'u' 'v' 'w'\n  3427\t        Dimensions without coordinates: x\n  3428\t        Data variables:\n  3429\t            a        (x, y) int64 0 1 2 3 4 5\n  3430\t            b        (x) int64 6 7\n  3431\t\n  3432\t        >>> data.to_stacked_array(\"z\", sample_dims=[\"x\"])\n  3433\t        <xarray.DataArray (x: 2, z: 4)>\n  3434\t        array([[0, 1, 2, 6],\n  3435\t            [3, 4, 5, 7]])\n  3436\t        Coordinates:\n  3437\t        * z         (z) MultiIndex\n  3438\t        - variable  (z) object 'a' 'a' 'a' 'b'\n  3439\t        - y         (z) object 'u' 'v' 'w' nan\n  3440\t        Dimensions without coordinates: x\n  3441\t\n  3442\t        \"\"\"\n  3443\t        stacking_dims = tuple(dim for dim in self.dims if dim not in sample_dims)\n  3444\t\n  3445\t        for variable in self:\n  3446\t            dims = self[variable].dims\n  3447\t            dims_include_sample_dims = set(sample_dims) <= set(dims)\n  3448\t            if not dims_include_sample_dims:\n  3449\t                raise ValueError(\n  3450\t                    \"All variables in the dataset must contain the \"\n  3451\t                    \"dimensions {}.\".format(dims)\n  3452\t                )\n  3453\t\n  3454\t        def ensure_stackable(val):\n  3455\t            assign_coords = {variable_dim: val.name}\n  3456\t            for dim in stacking_dims:\n  3457\t                if dim not in val.dims:\n  3458\t                    assign_coords[dim] = None\n  3459\t\n  3460\t            expand_dims = set(stacking_dims).difference(set(val.dims))\n  3461\t            expand_dims.add(variable_dim)\n  3462\t            # must be list for .expand_dims\n  3463\t            expand_dims = list(expand_dims)\n  3464\t\n  3465\t            return (\n  3466\t                val.assign_coords(**assign_coords)\n  3467\t                .expand_dims(expand_dims)\n  3468\t                .stack({new_dim: (variable_dim,) + stacking_dims})\n  3469\t            )\n  3470\t\n  3471\t        # concatenate the arrays\n  3472\t        stackable_vars = [ensure_stackable(self[key]) for key in self.data_vars]\n  3473\t        data_array = xr.concat(stackable_vars, dim=new_dim)\n  3474\t\n  3475\t        # coerce the levels of the MultiIndex to have the same type as the\n  3476\t        # input dimensions. This code is messy, so it might be better to just\n  3477\t        # input a dummy value for the singleton dimension.\n  3478\t        idx = data_array.indexes[new_dim]\n  3479\t        levels = [idx.levels[0]] + [\n  3480\t            level.astype(self[level.name].dtype) for level in idx.levels[1:]\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll display the rest of the function to understand how to_stacked_array finishes building the MultiIndex and any quirks affecting unstacking.\n\n```bash\nnl -ba xarray/core/dataset.py | sed -n '3480,3560p'\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9ntzCItIAhW46I7Zbwe3IH6Z0rch",
+          "created": 1771229147,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll display the rest of the function to understand how to_stacked_array finishes building the MultiIndex and any quirks affecting unstacking.\n\n```bash\nnl -ba xarray/core/dataset.py | sed -n '3480,3560p'\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 66,
+            "prompt_tokens": 6776,
+            "total_tokens": 6842,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 3840,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n  3480\t            level.astype(self[level.name].dtype) for level in idx.levels[1:]\n  3481\t        ]\n  3482\t        new_idx = idx.set_levels(levels)\n  3483\t        data_array[new_dim] = IndexVariable(new_dim, new_idx)\n  3484\t\n  3485\t        if name is not None:\n  3486\t            data_array.name = name\n  3487\t\n  3488\t        return data_array\n  3489\t\n  3490\t    def _unstack_once(self, dim: Hashable, fill_value, sparse) -> \"Dataset\":\n  3491\t        index = self.get_index(dim)\n  3492\t        index = remove_unused_levels_categories(index)\n  3493\t        full_idx = pd.MultiIndex.from_product(index.levels, names=index.names)\n  3494\t\n  3495\t        # take a shortcut in case the MultiIndex was not modified.\n  3496\t        if index.equals(full_idx):\n  3497\t            obj = self\n  3498\t        else:\n  3499\t            obj = self._reindex(\n  3500\t                {dim: full_idx}, copy=False, fill_value=fill_value, sparse=sparse\n  3501\t            )\n  3502\t\n  3503\t        new_dim_names = index.names\n  3504\t        new_dim_sizes = [lev.size for lev in index.levels]\n  3505\t\n  3506\t        variables: Dict[Hashable, Variable] = {}\n  3507\t        indexes = {k: v for k, v in self.indexes.items() if k != dim}\n  3508\t\n  3509\t        for name, var in obj.variables.items():\n  3510\t            if name != dim:\n  3511\t                if dim in var.dims:\n  3512\t                    new_dims = dict(zip(new_dim_names, new_dim_sizes))\n  3513\t                    variables[name] = var.unstack({dim: new_dims})\n  3514\t                else:\n  3515\t                    variables[name] = var\n  3516\t\n  3517\t        for name, lev in zip(new_dim_names, index.levels):\n  3518\t            variables[name] = IndexVariable(name, lev)\n  3519\t            indexes[name] = lev\n  3520\t\n  3521\t        coord_names = set(self._coord_names) - {dim} | set(new_dim_names)\n  3522\t\n  3523\t        return self._replace_with_new_dims(\n  3524\t            variables, coord_names=coord_names, indexes=indexes\n  3525\t        )\n  3526\t\n  3527\t    def unstack(\n  3528\t        self,\n  3529\t        dim: Union[Hashable, Iterable[Hashable]] = None,\n  3530\t        fill_value: Any = dtypes.NA,\n  3531\t        sparse: bool = False,\n  3532\t    ) -> \"Dataset\":\n  3533\t        \"\"\"\n  3534\t        Unstack existing dimensions corresponding to MultiIndexes into\n  3535\t        multiple new dimensions.\n  3536\t\n  3537\t        New dimensions will be added at the end.\n  3538\t\n  3539\t        Parameters\n  3540\t        ----------\n  3541\t        dim : Hashable or iterable of Hashable, optional\n  3542\t            Dimension(s) over which to unstack. By default unstacks all\n  3543\t            MultiIndexes.\n  3544\t        fill_value: value to be filled. By default, np.nan\n  3545\t        sparse: use sparse-array if True\n  3546\t\n  3547\t        Returns\n  3548\t        -------\n  3549\t        unstacked : Dataset\n  3550\t            Dataset with unstacked data.\n  3551\t\n  3552\t        See also\n  3553\t        --------\n  3554\t        Dataset.stack\n  3555\t        \"\"\"\n  3556\t        if dim is None:\n  3557\t            dims = [\n  3558\t                d for d in self.dims if isinstance(self.get_index(d), pd.MultiIndex)\n  3559\t            ]\n  3560\t        else:\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll run a small Python script that reproduces the issue from the PR description using the current code to confirm the failing behavior before making any changes.\n\n```bash\npython - <<'PY'\nimport xarray as xr\nimport numpy as np\narr = xr.DataArray(\n     np.arange(3),\n     coords=[(\"x\", [0, 1, 2])],\n )\ndata = xr.Dataset({\"a\": arr, \"b\": arr})\nstacked = data.to_stacked_array('y', sample_dims=['x'])\nprint(\"stacked:\", stacked)\ntry:\n    unstacked = stacked.to_unstacked_dataset('y')\n    print(\"unstacked:\", unstacked)\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\nPY\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nu1nbMfRuKaxrvAI1JhZtBlpIlz",
+          "created": 1771229149,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll run a small Python script that reproduces the issue from the PR description using the current code to confirm the failing behavior before making any changes.\n\n```bash\npython - <<'PY'\nimport xarray as xr\nimport numpy as np\narr = xr.DataArray(\n     np.arange(3),\n     coords=[(\"x\", [0, 1, 2])],\n )\ndata = xr.Dataset({\"a\": arr, \"b\": arr})\nstacked = data.to_stacked_array('y', sample_dims=['x'])\nprint(\"stacked:\", stacked)\ntry:\n    unstacked = stacked.to_unstacked_dataset('y')\n    print(\"unstacked:\", unstacked)\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\nPY\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 364,
+            "prompt_tokens": 7777,
+            "total_tokens": 8141,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 192,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 5888,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nTraceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\n  File \"/testbed/xarray/core/dataarray.py\", line 1967, in to_unstacked_dataset\n    return Dataset(data_dict)\n  File \"/testbed/xarray/core/dataset.py\", line 543, in __init__\n    variables, coord_names, dims, indexes, _ = merge_data_and_coords(\n  File \"/testbed/xarray/core/merge.py\", line 466, in merge_data_and_coords\n    return merge_core(\n  File \"/testbed/xarray/core/merge.py\", line 597, in merge_core\n    variables, out_indexes = merge_collected(collected, prioritized, compat=compat)\n  File \"/testbed/xarray/core/merge.py\", line 228, in merge_collected\n    merged_vars[name] = unique_variable(name, variables, compat)\n  File \"/testbed/xarray/core/merge.py\", line 142, in unique_variable\n    raise MergeError(\nxarray.core.merge.MergeError: conflicting values for variable 'y' on objects to be combined. You can skip this check by specifying compat='override'.\nstacked: <xarray.DataArray 'a' (x: 3, y: 2)>\narray([[0, 0],\n       [1, 1],\n       [2, 2]])\nCoordinates:\n  * x         (x) int64 0 1 2\n  * y         (y) MultiIndex\n  - variable  (y) object 'a' 'b'\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll search for _to_temp_dataset in the codebase to see how DataArray previously converts to a temporary Dataset, which may offer a pattern to construct the unstacked Dataset without causing merge conflicts.\n\n```bash\ngrep -n \"_to_temp_dataset\" -n xarray -R && nl -ba xarray/core/dataarray.py | sed -n '1800,1870p'\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nu7zbKqc19ycOMhQYPc1H7Yoc7c",
+          "created": 1771229155,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll search for _to_temp_dataset in the codebase to see how DataArray previously converts to a temporary Dataset, which may offer a pattern to construct the unstacked Dataset without causing merge conflicts.\n\n```bash\ngrep -n \"_to_temp_dataset\" -n xarray -R && nl -ba xarray/core/dataarray.py | sed -n '1800,1870p'\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 868,
+            "prompt_tokens": 8294,
+            "total_tokens": 9162,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 768,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 6912,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nxarray/core/parallel.py:87:    # only using _to_temp_dataset would break\nxarray/core/parallel.py:91:        dataset = obj._to_temp_dataset()\nxarray/core/parallel.py:105:        obj = obj._to_temp_dataset()\nxarray/core/parallel.py:152:        x = x._to_temp_dataset()\nxarray/core/parallel.py:401:        template = template._to_temp_dataset()\nxarray/core/common.py:237:    # - particularly DataArray methods that perform a _to_temp_dataset() round-trip - by\nxarray/core/concat.py:456:        datasets.append(arr._to_temp_dataset())\nxarray/core/dataarray.py:421:    def _to_temp_dataset(self) -> Dataset:\nxarray/core/dataarray.py:464:        # use private APIs for speed: this is called by _to_temp_dataset(),\nxarray/core/dataarray.py:765:        return self._to_temp_dataset().__dask_graph__()\nxarray/core/dataarray.py:768:        return self._to_temp_dataset().__dask_keys__()\nxarray/core/dataarray.py:771:        return self._to_temp_dataset().__dask_layers__()\nxarray/core/dataarray.py:775:        return self._to_temp_dataset().__dask_optimize__\nxarray/core/dataarray.py:779:        return self._to_temp_dataset().__dask_scheduler__\nxarray/core/dataarray.py:782:        func, args = self._to_temp_dataset().__dask_postcompute__()\nxarray/core/dataarray.py:786:        func, args = self._to_temp_dataset().__dask_postpersist__()\nxarray/core/dataarray.py:814:        ds = self._to_temp_dataset().load(**kwargs)\nxarray/core/dataarray.py:858:        ds = self._to_temp_dataset().persist(**kwargs)\nxarray/core/dataarray.py:1000:        ds = self._to_temp_dataset().chunk(\nxarray/core/dataarray.py:1045:            ds = self._to_temp_dataset()._isel_fancy(\nxarray/core/dataarray.py:1149:        ds = self._to_temp_dataset().sel(\nxarray/core/dataarray.py:1172:        ds = self._to_temp_dataset().head(indexers, **indexers_kwargs)\nxarray/core/dataarray.py:1189:        ds = self._to_temp_dataset().tail(indexers, **indexers_kwargs)\nxarray/core/dataarray.py:1206:        ds = self._to_temp_dataset().thin(indexers, **indexers_kwargs)\nxarray/core/dataarray.py:1388:        ds = self._to_temp_dataset().reindex(\nxarray/core/dataarray.py:1455:        ds = self._to_temp_dataset().interp(\nxarray/core/dataarray.py:1514:        ds = self._to_temp_dataset().interp_like(\nxarray/core/dataarray.py:1552:            dataset = self._to_temp_dataset().rename(name_dict)\nxarray/core/dataarray.py:1606:        ds = self._to_temp_dataset().swap_dims(dims_dict)\nxarray/core/dataarray.py:1659:        ds = self._to_temp_dataset().expand_dims(dim, axis)\nxarray/core/dataarray.py:1717:        ds = self._to_temp_dataset().set_index(\nxarray/core/dataarray.py:1843:        ds = self._to_temp_dataset().stack(dimensions, **dimensions_kwargs)\nxarray/core/dataarray.py:1898:        ds = self._to_temp_dataset().unstack(dim, fill_value, sparse)\nxarray/core/dataarray.py:2031:        ds = self._to_temp_dataset().drop_vars(names, errors=errors)\nxarray/core/dataarray.py:2051:        ds = self._to_temp_dataset().drop(labels, dim, errors=errors)\nxarray/core/dataarray.py:2082:        ds = self._to_temp_dataset().drop_sel(labels, errors=errors)\nxarray/core/dataarray.py:2106:        ds = self._to_temp_dataset().dropna(dim, how=how, thresh=thresh)\nxarray/core/dataarray.py:2807:        ds = self._to_temp_dataset().diff(n=n, dim=dim, label=label)\nxarray/core/dataarray.py:2904:        ds = self._to_temp_dataset().roll(\nxarray/core/dataarray.py:3025:        ds = self._to_temp_dataset().sortby(variables, ascending=ascending)\nxarray/core/dataarray.py:3112:        ds = self._to_temp_dataset().quantile(\nxarray/core/dataarray.py:3160:        ds = self._to_temp_dataset().rank(dim, pct=pct, keep_attrs=keep_attrs)\nxarray/core/dataarray.py:3219:        ds = self._to_temp_dataset().differentiate(coord, edge_order, datetime_unit)\nxarray/core/dataarray.py:3271:        ds = self._to_temp_dataset().integrate(dim, datetime_unit)\nxarray/core/dataarray.py:3287:        ds = self._to_temp_dataset().unify_chunks()\nxarray/core/dataarray.py:3455:        return self._to_temp_dataset().polyfit(\nxarray/core/dataarray.py:3617:        ds = self._to_temp_dataset().pad(\ngrep: xarray/core/__pycache__/dataarray.cpython-310.pyc: binary file matches\ngrep: xarray/core/__pycache__/parallel.cpython-310.pyc: binary file matches\ngrep: xarray/core/__pycache__/concat.cpython-310.pyc: binary file matches\nxarray/tests/test_dask.py:1572:        assert_equal(map_da._from_temp_dataset(map_da._to_temp_dataset()), map_da)\nxarray/convert.py:305:    decoded_ds = decode_cf(dataarray._to_temp_dataset())\n  1800\t        New dimensions will be added at the end, and the corresponding\n  1801\t        coordinate variables will be combined into a MultiIndex.\n  1802\t\n  1803\t        Parameters\n  1804\t        ----------\n  1805\t        dimensions : Mapping of the form new_name=(dim1, dim2, ...)\n  1806\t            Names of new dimensions, and the existing dimensions that they\n  1807\t            replace. An ellipsis (`...`) will be replaced by all unlisted dimensions.\n  1808\t            Passing a list containing an ellipsis (`stacked_dim=[...]`) will stack over\n  1809\t            all dimensions.\n  1810\t        **dimensions_kwargs:\n  1811\t            The keyword arguments form of ``dimensions``.\n  1812\t            One of dimensions or dimensions_kwargs must be provided.\n  1813\t\n  1814\t        Returns\n  1815\t        -------\n  1816\t        stacked : DataArray\n  1817\t            DataArray with stacked data.\n  1818\t\n  1819\t        Examples\n  1820\t        --------\n  1821\t\n  1822\t        >>> arr = xr.DataArray(\n  1823\t        ...     np.arange(6).reshape(2, 3),\n  1824\t        ...     coords=[(\"x\", [\"a\", \"b\"]), (\"y\", [0, 1, 2])],\n  1825\t        ... )\n  1826\t        >>> arr\n  1827\t        <xarray.DataArray (x: 2, y: 3)>\n  1828\t        array([[0, 1, 2],\n  1829\t               [3, 4, 5]])\n  1830\t        Coordinates:\n  1831\t          * x        (x) |S1 'a' 'b'\n  1832\t          * y        (y) int64 0 1 2\n  1833\t        >>> stacked = arr.stack(z=(\"x\", \"y\"))\n  1834\t        >>> stacked.indexes[\"z\"]\n  1835\t        MultiIndex(levels=[['a', 'b'], [0, 1, 2]],\n  1836\t                   codes=[[0, 0, 0, 1, 1, 1], [0, 1, 2, 0, 1, 2]],\n  1837\t                   names=['x', 'y'])\n  1838\t\n  1839\t        See Also\n  1840\t        --------\n  1841\t        DataArray.unstack\n  1842\t        \"\"\"\n  1843\t        ds = self._to_temp_dataset().stack(dimensions, **dimensions_kwargs)\n  1844\t        return self._from_temp_dataset(ds)\n  1845\t\n  1846\t    def unstack(\n  1847\t        self,\n  1848\t        dim: Union[Hashable, Sequence[Hashable], None] = None,\n  1849\t        fill_value: Any = dtypes.NA,\n  1850\t        sparse: bool = False,\n  1851\t    ) -> \"DataArray\":\n  1852\t        \"\"\"\n  1853\t        Unstack existing dimensions corresponding to MultiIndexes into\n  1854\t        multiple new dimensions.\n  1855\t\n  1856\t        New dimensions will be added at the end.\n  1857\t\n  1858\t        Parameters\n  1859\t        ----------\n  1860\t        dim : hashable or sequence of hashable, optional\n  1861\t            Dimension(s) over which to unstack. By default unstacks all\n  1862\t            MultiIndexes.\n  1863\t        fill_value: value to be filled. By default, np.nan\n  1864\t        sparse: use sparse-array if True\n  1865\t\n  1866\t        Returns\n  1867\t        -------\n  1868\t        unstacked : DataArray\n  1869\t            Array with unstacked data.\n  1870\t\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I will open the DataArray._to_temp_dataset implementation to see how the DataArray is converted to a temporary Dataset. This will help design a fix that mirrors existing patterns.\n\n```bash\nnl -ba xarray/core/dataarray.py | sed -n '400,520p'\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nuGNl1TItiFIybHIjMm4w1YszNv",
+          "created": 1771229164,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I will open the DataArray._to_temp_dataset implementation to see how the DataArray is converted to a temporary Dataset. This will help design a fix that mirrors existing patterns.\n\n```bash\nnl -ba xarray/core/dataarray.py | sed -n '400,520p'\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 910,
+            "prompt_tokens": 10504,
+            "total_tokens": 11414,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 832,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 8064,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n   400\t                self._indexes, exclude=(set(self.dims) - allowed_dims)\n   401\t            )\n   402\t        return self._replace(variable, coords, name, indexes=indexes)\n   403\t\n   404\t    def _overwrite_indexes(self, indexes: Mapping[Hashable, Any]) -> \"DataArray\":\n   405\t        if not len(indexes):\n   406\t            return self\n   407\t        coords = self._coords.copy()\n   408\t        for name, idx in indexes.items():\n   409\t            coords[name] = IndexVariable(name, idx)\n   410\t        obj = self._replace(coords=coords)\n   411\t\n   412\t        # switch from dimension to level names, if necessary\n   413\t        dim_names: Dict[Any, str] = {}\n   414\t        for dim, idx in indexes.items():\n   415\t            if not isinstance(idx, pd.MultiIndex) and idx.name != dim:\n   416\t                dim_names[dim] = idx.name\n   417\t        if dim_names:\n   418\t            obj = obj.rename(dim_names)\n   419\t        return obj\n   420\t\n   421\t    def _to_temp_dataset(self) -> Dataset:\n   422\t        return self._to_dataset_whole(name=_THIS_ARRAY, shallow_copy=False)\n   423\t\n   424\t    def _from_temp_dataset(\n   425\t        self, dataset: Dataset, name: Hashable = _default\n   426\t    ) -> \"DataArray\":\n   427\t        variable = dataset._variables.pop(_THIS_ARRAY)\n   428\t        coords = dataset._variables\n   429\t        indexes = dataset._indexes\n   430\t        return self._replace(variable, coords, name, indexes=indexes)\n   431\t\n   432\t    def _to_dataset_split(self, dim: Hashable) -> Dataset:\n   433\t        \"\"\" splits dataarray along dimension 'dim' \"\"\"\n   434\t\n   435\t        def subset(dim, label):\n   436\t            array = self.loc[{dim: label}]\n   437\t            array.attrs = {}\n   438\t            return as_variable(array)\n   439\t\n   440\t        variables = {label: subset(dim, label) for label in self.get_index(dim)}\n   441\t        variables.update({k: v for k, v in self._coords.items() if k != dim})\n   442\t        indexes = propagate_indexes(self._indexes, exclude=dim)\n   443\t        coord_names = set(self._coords) - set([dim])\n   444\t        dataset = Dataset._construct_direct(\n   445\t            variables, coord_names, indexes=indexes, attrs=self.attrs\n   446\t        )\n   447\t        return dataset\n   448\t\n   449\t    def _to_dataset_whole(\n   450\t        self, name: Hashable = None, shallow_copy: bool = True\n   451\t    ) -> Dataset:\n   452\t        if name is None:\n   453\t            name = self.name\n   454\t        if name is None:\n   455\t            raise ValueError(\n   456\t                \"unable to convert unnamed DataArray to a \"\n   457\t                \"Dataset without providing an explicit name\"\n   458\t            )\n   459\t        if name in self.coords:\n   460\t            raise ValueError(\n   461\t                \"cannot create a Dataset from a DataArray with \"\n   462\t                \"the same name as one of its coordinates\"\n   463\t            )\n   464\t        # use private APIs for speed: this is called by _to_temp_dataset(),\n   465\t        # which is used in the guts of a lot of operations (e.g., reindex)\n   466\t        variables = self._coords.copy()\n   467\t        variables[name] = self.variable\n   468\t        if shallow_copy:\n   469\t            for k in variables:\n   470\t                variables[k] = variables[k].copy(deep=False)\n   471\t        indexes = self._indexes\n   472\t\n   473\t        coord_names = set(self._coords)\n   474\t        dataset = Dataset._construct_direct(variables, coord_names, indexes=indexes)\n   475\t        return dataset\n   476\t\n   477\t    def to_dataset(\n   478\t        self,\n   479\t        dim: Hashable = None,\n   480\t        *,\n   481\t        name: Hashable = None,\n   482\t        promote_attrs: bool = False,\n   483\t    ) -> Dataset:\n   484\t        \"\"\"Convert a DataArray to a Dataset.\n   485\t\n   486\t        Parameters\n   487\t        ----------\n   488\t        dim : hashable, optional\n   489\t            Name of the dimension on this array along which to split this array\n   490\t            into separate variables. If not provided, this array is converted\n   491\t            into a Dataset of one variable.\n   492\t        name : hashable, optional\n   493\t            Name to substitute for this array's name. Only valid if ``dim`` is\n   494\t            not provided.\n   495\t        promote_attrs : bool, default False\n   496\t            Set to True to shallow copy attrs of DataArray to returned Dataset.\n   497\t\n   498\t        Returns\n   499\t        -------\n   500\t        dataset : Dataset\n   501\t        \"\"\"\n   502\t        if dim is not None and dim not in self.dims:\n   503\t            raise TypeError(\n   504\t                f\"{dim} is not a dim. If supplying a ``name``, pass as a kwarg.\"\n   505\t            )\n   506\t\n   507\t        if dim is not None:\n   508\t            if name is not None:\n   509\t                raise TypeError(\"cannot supply both dim and name arguments\")\n   510\t            result = self._to_dataset_split(dim)\n   511\t        else:\n   512\t            result = self._to_dataset_whole(name)\n   513\t\n   514\t        if promote_attrs:\n   515\t            result.attrs = dict(self.attrs)\n   516\t\n   517\t        return result\n   518\t\n   519\t    @property\n   520\t    def name(self) -> Optional[Hashable]:\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I will modify DataArray.to_unstacked_dataset to construct the Dataset using Dataset._construct_direct and as_variable (like _to_dataset_split) instead of passing a dict of DataArrays to Dataset(), which causes merge conflicts for single-dim variables. I'll make an in-place edit to xarray/core/dataarray.py replacing the data_dict construction and return with logic that builds variables as Variables and sets indexes/coord_names accordingly. Then I'll run a small Python snippet to reproduce the original failing example to verify the fix.\n\n```bash\npython - <<'PY'\nfrom pathlib import Path\np = Path(\"xarray/core/dataarray.py\")\ns = p.read_text()\nold = \"\"\"        # pull variables out of datarray\n        data_dict = {}\n        for k in variables:\n            data_dict[k] = self.sel({variable_dim: k}).squeeze(drop=True)\n\n        # unstacked dataset\n        return Dataset(data_dict)\n\"\"\"\nif old not in s:\n    print(\"Expected block not found; aborting\")\n    raise SystemExit(1)\nnew = \"\"\"        # pull variables out of datarray\n        variables_dict = {}\n        for k in variables:\n            arr = self.sel({variable_dim: k}).squeeze(drop=True)\n            # clear attrs to match DataArray._to_dataset_split behavior\n            arr.attrs = {}\n            # convert to a Variable (no attached coords) to avoid merge conflicts\n            variables_dict[k] = as_variable(arr)\n\n        # unstacked dataset (construct directly to control coords/indexes)\n        indexes = propagate_indexes(self._indexes, exclude=dim)\n        coord_names = set(self._coords) - set([dim])\n        return Dataset._construct_direct(\n            variables_dict, coord_names, indexes=indexes, attrs=self.attrs\n        )\n\"\"\"\ns2 = s.replace(old, new)\np.write_text(s2)\nprint(\"Patched xarray/core/dataarray.py\")\n# run reproduction test\nimport subprocess, sys, textwrap\ntest = textwrap.dedent('''\\\nimport xarray as xr\nimport numpy as np\narr = xr.DataArray(\n     np.arange(3),\n     coords=[(\"x\", [0, 1, 2])],\n )\ndata = xr.Dataset({\"a\": arr, \"b\": arr})\nstacked = data.to_stacked_array('y', sample_dims=['x'])\nprint(\"stacked:\", stacked)\ntry:\n    unstacked = stacked.to_unstacked_dataset('y')\n    print(\"unstacked:\", unstacked)\n    print(\"SUCCESS: to_unstacked_dataset completed without MergeError\")\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\n    sys.exit(1)\n''')\nproc = subprocess.run([sys.executable, \"-c\", test], capture_output=True, text=True)\nprint(proc.stdout)\nprint(proc.stderr)\nif proc.returncode != 0:\n    raise SystemExit(proc.returncode)\nPY\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nuP27zvxnl5Y37YbPWVbW4R07I8",
+          "created": 1771229173,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I will modify DataArray.to_unstacked_dataset to construct the Dataset using Dataset._construct_direct and as_variable (like _to_dataset_split) instead of passing a dict of DataArrays to Dataset(), which causes merge conflicts for single-dim variables. I'll make an in-place edit to xarray/core/dataarray.py replacing the data_dict construction and return with logic that builds variables as Variables and sets indexes/coord_names accordingly. Then I'll run a small Python snippet to reproduce the original failing example to verify the fix.\n\n```bash\npython - <<'PY'\nfrom pathlib import Path\np = Path(\"xarray/core/dataarray.py\")\ns = p.read_text()\nold = \"\"\"        # pull variables out of datarray\n        data_dict = {}\n        for k in variables:\n            data_dict[k] = self.sel({variable_dim: k}).squeeze(drop=True)\n\n        # unstacked dataset\n        return Dataset(data_dict)\n\"\"\"\nif old not in s:\n    print(\"Expected block not found; aborting\")\n    raise SystemExit(1)\nnew = \"\"\"        # pull variables out of datarray\n        variables_dict = {}\n        for k in variables:\n            arr = self.sel({variable_dim: k}).squeeze(drop=True)\n            # clear attrs to match DataArray._to_dataset_split behavior\n            arr.attrs = {}\n            # convert to a Variable (no attached coords) to avoid merge conflicts\n            variables_dict[k] = as_variable(arr)\n\n        # unstacked dataset (construct directly to control coords/indexes)\n        indexes = propagate_indexes(self._indexes, exclude=dim)\n        coord_names = set(self._coords) - set([dim])\n        return Dataset._construct_direct(\n            variables_dict, coord_names, indexes=indexes, attrs=self.attrs\n        )\n\"\"\"\ns2 = s.replace(old, new)\np.write_text(s2)\nprint(\"Patched xarray/core/dataarray.py\")\n# run reproduction test\nimport subprocess, sys, textwrap\ntest = textwrap.dedent('''\\\nimport xarray as xr\nimport numpy as np\narr = xr.DataArray(\n     np.arange(3),\n     coords=[(\"x\", [0, 1, 2])],\n )\ndata = xr.Dataset({\"a\": arr, \"b\": arr})\nstacked = data.to_stacked_array('y', sample_dims=['x'])\nprint(\"stacked:\", stacked)\ntry:\n    unstacked = stacked.to_unstacked_dataset('y')\n    print(\"unstacked:\", unstacked)\n    print(\"SUCCESS: to_unstacked_dataset completed without MergeError\")\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\n    sys.exit(1)\n''')\nproc = subprocess.run([sys.executable, \"-c\", test], capture_output=True, text=True)\nprint(proc.stdout)\nprint(proc.stderr)\nif proc.returncode != 0:\n    raise SystemExit(proc.returncode)\nPY\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 2855,
+            "prompt_tokens": 11914,
+            "total_tokens": 14769,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 2240,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 10112,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nPatched xarray/core/dataarray.py\nstacked: <xarray.DataArray 'a' (x: 3, y: 2)>\narray([[0, 0],\n       [1, 1],\n       [2, 2]])\nCoordinates:\n  * x         (x) int64 0 1 2\n  * y         (y) MultiIndex\n  - variable  (y) object 'a' 'b'\nunstacked: <xarray.Dataset>\nDimensions:  (x: 3)\nCoordinates:\nData variables:\n    a        (x) int64 0 1 2\n    b        (x) int64 0 1 2\nSUCCESS: to_unstacked_dataset completed without MergeError\n\n\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I updated DataArray.to_unstacked_dataset to build the Dataset via Dataset._construct_direct using as_variable and propagate_indexes to avoid MergeError when variables have only a single (non-stacked) dimension. Now I'll stage all changes and show the staged diff for submission.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+      "extra": {
+        "response": {
+          "id": "chatcmpl-D9nuuz7PJjy0MjAPLjuiPZUByVeK2",
+          "created": 1771229204,
+          "model": "gpt-5-mini-2025-08-07",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I updated DataArray.to_unstacked_dataset to build the Dataset via Dataset._construct_direct using as_variable and propagate_indexes to avoid MergeError when variables have only a single (non-stacked) dimension. Now I'll stage all changes and show the staged diff for submission.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "annotations": []
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 474,
+            "prompt_tokens": 12704,
+            "total_tokens": 13178,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 384,
+              "rejected_prediction_tokens": 0,
+              "text_tokens": null
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 11136,
+              "text_tokens": null,
+              "image_tokens": null
+            }
+          },
+          "service_tier": "default"
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "diff --git a/xarray/core/dataarray.py b/xarray/core/dataarray.py\nindex b0df8749..00f3d6f3 100644\n--- a/xarray/core/dataarray.py\n+++ b/xarray/core/dataarray.py\n@@ -1959,12 +1959,20 @@ class DataArray(AbstractArray, DataWithCoords):\n         variable_dim = idx.names[level_number]\n \n         # pull variables out of datarray\n-        data_dict = {}\n+        variables_dict = {}\n         for k in variables:\n-            data_dict[k] = self.sel({variable_dim: k}).squeeze(drop=True)\n+            arr = self.sel({variable_dim: k}).squeeze(drop=True)\n+            # clear attrs to match DataArray._to_dataset_split behavior\n+            arr.attrs = {}\n+            # convert to a Variable (no attached coords) to avoid merge conflicts\n+            variables_dict[k] = as_variable(arr)\n \n-        # unstacked dataset\n-        return Dataset(data_dict)\n+        # unstacked dataset (construct directly to control coords/indexes)\n+        indexes = propagate_indexes(self._indexes, exclude=dim)\n+        coord_names = set(self._coords) - set([dim])\n+        return Dataset._construct_direct(\n+            variables_dict, coord_names, indexes=indexes, attrs=self.attrs\n+        )\n \n     def transpose(self, *dims: Hashable, transpose_coords: bool = True) -> \"DataArray\":\n         \"\"\"Return a new DataArray object with transposed dimensions.\n"
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1",
+  "instance_id": "pydata__xarray-4094"
+}

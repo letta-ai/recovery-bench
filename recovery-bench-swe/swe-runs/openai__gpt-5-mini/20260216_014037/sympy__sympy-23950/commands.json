@@ -1,0 +1,26 @@
+{
+  "instance": "sympy__sympy-23950",
+  "commands": [
+    "ls -la",
+    "grep -Rn \"class Contains\" -n sympy || true && grep -Rn \"Contains(\" -n sympy | head -n 50 || true",
+    "nl -ba sympy/sets/contains.py | sed -n '1,240p'",
+    "grep -R \"def as_set\" -n sympy || true",
+    "nl -ba sympy/logic/boolalg.py | sed -n '1,260p'",
+    "nl -ba sympy/core/symbol.py | sed -n '1,240p'",
+    "nl -ba sympy/sets/sets.py | sed -n '1,360p'",
+    "grep -R \"def _eval_as_set\" -n sympy || true",
+    "nl -ba sympy/logic/boolalg.py | sed -n '680,980p'",
+    "nl -ba sympy/core/relational.py | sed -n '440,620p'",
+    "grep -R \"Contains(.*).as_set\" -n || true",
+    "nl -ba sympy/sets/tests/test_contains.py | sed -n '1,240p'",
+    "nl -ba sympy/functions/elementary/piecewise.py | sed -n '1,260p'",
+    "grep -R \"def as_relational\" -n sympy || true",
+    "python3 - <<'PY'\nfrom sympy import Piecewise, Contains, S, Symbol\nx = Symbol('x')\ntry:\n    print(Piecewise((6, Contains(x, S.Reals)), (7, True)))\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\nPY",
+    "grep -R \"\\.as_set().as_relational\" -n || true",
+    "grep -R \"as_set().as_relational\" -n || true",
+    "python3 - <<'PY'\nfrom sympy import Contains, S, Symbol\nx = Symbol('x')\ntry:\n    r = Contains(x, S.Reals).as_set()\n    print(\"Contains(x, S.Reals).as_set() ->\", repr(r))\n    print(\"Type:\", type(r))\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\nPY",
+    "git apply -p0 <<'PATCH'\n*** Begin Patch\n*** Update File: sympy/sets/contains.py\n@@\n     def as_set(self):\n-        raise NotImplementedError()\n+        \"\"\"\n+        Rewrite the containment predicate in terms of a set of the free\n+        variable. If the expression is univariate (has exactly one free\n+        symbol) then the set of values satisfying the predicate is simply\n+        the set given as the second argument. For multivariate cases the\n+        rewrite is not implemented.\n+\n+        Examples\n+        ========\n+        >>> from sympy import Contains, S, Symbol, FiniteSet\n+        >>> x = Symbol('x')\n+        >>> Contains(x, S.Reals).as_set()\n+        Reals\n+        >>> y = Symbol('y')\n+        >>> # multivariate: not implemented\n+        >>> Contains(x, FiniteSet(y)).as_set()\n+        Traceback (most recent call last):\n+        ...\n+        NotImplementedError\n+        \"\"\"\n+        free = self.free_symbols\n+        if len(free) == 1:\n+            # For univariate Contains(x, S), the set of x for which the\n+            # predicate is true is simply S. Returning the set allows\n+            # subsequent as_relational(symbol) calls on that set.\n+            return self.args[1]\n+        raise NotImplementedError()\n*** End Patch\nPATCH",
+    "python3 - <<'PY'\nfrom pathlib import Path\nimport re\np = Path('sympy/sets/contains.py')\ns = p.read_text()\npattern = re.compile(r\"def as_set\\(self\\):\\n\\s+raise NotImplementedError\\(\\)\\n\", re.M)\nnew = \"\"\"def as_set(self):\n        \\\"\\\"\\\"Rewrite the containment predicate as a Set for the free variable.\n\n        If the predicate is univariate (exactly one free symbol), then the\n        set of values satisfying the predicate is the set provided as the\n        second argument. For multivariate cases the operation is not\n        implemented and NotImplementedError is raised to preserve previous\n        behavior.\n        \\\"\\\"\\\"\n        free = self.free_symbols\n        if len(free) == 1:\n            return self.args[1]\n        raise NotImplementedError()\n\"\"\"\nif pattern.search(s):\n    s2 = pattern.sub(new, s, count=1)\n    p.write_text(s2)\n    print(\"updated\")\nelse:\n    print(\"pattern not found; no changes made\")\nPY",
+    "python3 - <<'PY'\nfrom sympy import Contains, S, Symbol, FiniteSet, Piecewise\nx = Symbol('x')\ny = Symbol('y')\nprint(\"Contains(x, S.Reals).as_set():\", Contains(x, S.Reals).as_set())\ntry:\n    print(\"Contains(x, FiniteSet(y)).as_set():\", Contains(x, FiniteSet(y)).as_set())\nexcept Exception as e:\n    print(\"Contains(x, FiniteSet(y)).as_set() raised:\", type(e).__name__, e)\ntry:\n    print(\"Piecewise with Contains condition:\", Piecewise((6, Contains(x, S.Reals)), (7, True)))\nexcept Exception as e:\n    import traceback\n    traceback.print_exc()\nPY"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "instance": "django__django-11138",
+  "commands": [
+    "ls -la",
+    "nl -ba django/db/backends/mysql/operations.py | sed -n '1,240p'",
+    "grep -nR \"TIME_ZONE\\|connection.timezone\" -n django | sed -n '1,200p'",
+    "nl -ba django/db/backends/mysql/operations.py | sed -n '60,100p'",
+    "nl -ba django/db/backends/base/base.py | sed -n '1,260p'",
+    "grep -n \"def timezone\\|@property.*timezone\\|connection.timezone\\|self.timezone\" -n django/db -R | sed -n '1,200p'",
+    "nl -ba django/db/backends/base/base.py | sed -n '100,160p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('django/db/backends/mysql/operations.py')\ns = p.read_text()\nold_block = (\n    \"    def _convert_field_to_tz(self, field_name, tzname):\\n\"\n    \"        if settings.USE_TZ:\\n\"\n    \"            field_name = \\\"CONVERT_TZ(%s, 'UTC', '%s')\\\" % (field_name, tzname)\\n\"\n    \"        return field_name\\n\"\n)\nnew_block = (\n    \"    def _convert_field_to_tz(self, field_name, tzname):\\n\"\n    \"        if settings.USE_TZ:\\n\"\n    \"            # Use the connection-specific timezone as the source timezone.\\n\"\n    \"            # Avoid unnecessary CONVERT_TZ when the source and target timezones are equal,\\n\"\n    \"            # which also avoids requiring tz tables to be populated in MySQL.\\n\"\n    \"            db_tz = self.connection.timezone_name\\n\"\n    \"            if db_tz == tzname:\\n\"\n    \"                return field_name\\n\"\n    \"            field_name = \\\"CONVERT_TZ(%s, '%s', '%s')\\\" % (field_name, db_tz, tzname)\\n\"\n    \"        return field_name\\n\"\n)\nif old_block in s:\n    s = s.replace(old_block, new_block)\nelse:\n    import re\n    s = re.sub(\n        r\"def _convert_field_to_tz\\\\(self, field_name, tzname\\\\):[\\\\s\\\\S]*?return field_name\\\\n\",\n        new_block,\n        s,\n        count=1,\n    )\np.write_text(s)\nprint('patched', p)\nPY",
+    "python -m py_compile django/db/backends/mysql/operations.py",
+    "grep -R \"CONVERT_TZ\\\\|mysql.*date\\\\|mysql.*timezone\" -n tests | sed -n '1,200p'"
+  ]
+}

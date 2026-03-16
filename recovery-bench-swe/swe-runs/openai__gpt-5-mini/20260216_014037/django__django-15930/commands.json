@@ -1,0 +1,28 @@
+{
+  "instance": "django__django-15930",
+  "commands": [
+    "ls -la",
+    "grep -R \"class Case\" -n django || true",
+    "nl -ba django/db/models/expressions.py | sed -n '1200,1400p'",
+    "nl -ba django/db/models/expressions.py | sed -n '1400,1600p'",
+    "grep -R \"class Q\" -n django || true",
+    "nl -ba django/db/models/query_utils.py | sed -n '1,240p'",
+    "nl -ba django/utils/tree.py | sed -n '1,260p'",
+    "nl -ba django/db/models/expressions.py | sed -n '1000,1220p'",
+    "grep -R \"EmptyResultSet\" -n django || true",
+    "nl -ba django/db/models/lookups.py | sed -n '1,260p'",
+    "grep -n \"lookup_name = 'in'\" -n django/db/models -R || true",
+    "grep -R \"lookup_name = 'in'\" django/db/models || true",
+    "grep -n \"class .*In\" django/db/models -R || true",
+    "nl -ba django/db/models/lookups.py | sed -n '390,460p'",
+    "nl -ba django/db/models/sql/where.py | sed -n '1,320p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path(\"django/db/models/expressions.py\")\ns = p.read_text()\nold = (\n    \"        condition_sql, condition_params = compiler.compile(self.condition)\\n\"\n    \"        template_params[\\\"condition\\\"] = condition_sql\\n\"\n    \"        sql_params.extend(condition_params)\\n\"\n)\nnew = (\n    \"        condition_sql, condition_params = compiler.compile(self.condition)\\n\"\n    \"        if not condition_sql:\\n\"\n    \"            # Empty condition means the clause matches everything; use a TRUE\\n\"\n    \"            # literal so the CASE WHEN expression remains valid.\\n\"\n    \"            if not connection.features.supports_boolean_expr_in_select_clause:\\n\"\n    \"                condition_sql = \\\"1=1\\\"\\n\"\n    \"                condition_params = []\\n\"\n    \"            else:\\n\"\n    \"                condition_sql, condition_params = compiler.compile(Value(True))\\n\"\n    \"        template_params[\\\"condition\\\"] = condition_sql\\n\"\n    \"        sql_params.extend(condition_params)\\n\"\n)\nif old not in s:\n    print(\"PATTERN_NOT_FOUND\")\nelse:\n    s = s.replace(old, new, 1)\n    p.write_text(s)\n    print(\"MODIFIED\")\nPY",
+    "grep -R \"pk__in=[]\" -n tests || true",
+    "grep -R --fixed-strings \"pk__in=[]\" -n tests || true",
+    "pytest -q tests/queries/tests.py::QueriesTests::test_q_combinator_behavior -q",
+    "git --no-pager diff -- django/db/models/expressions.py",
+    "python - <<'PY'\nimport ast,sys\np='django/db/models/expressions.py'\ntry:\n    with open(p,'r') as f:\n        src=f.read()\n    ast.parse(src)\n    print(\"SYNTAX_OK\")\n    # print the modified function snippet\n    for i,line in enumerate(src.splitlines(),1):\n        if i>=1290 and i<=1310:\n            print(f\"{i:4}: {line}\")\nexcept Exception as e:\n    print(\"ERROR\",e)\n    sys.exit(1)\nPY",
+    "python -m unittest tests.expressions_case.tests.CaseTests.test_when_with_empty_in",
+    "git add -A && git commit -m \"Fixed Case/When: emit TRUE literal for empty When condition (avoid malformed 'WHEN THEN' SQL)\""
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "instance": "astropy__astropy-13977",
+  "commands": [
+    "ls -la",
+    "grep -nR \"__array_ufunc__\" astropy || true",
+    "nl -ba astropy/units/quantity.py | sed -n '1,260p'",
+    "nl -ba astropy/units/quantity.py | sed -n '600,740p'",
+    "nl -ba astropy/units/quantity_helper.py | sed -n '1,260p'",
+    "ls -la astropy/units",
+    "ls -la astropy/units/quantity_helper && nl -ba astropy/units/quantity_helper/__init__.py | sed -n '1,240p'",
+    "python - <<'PY'\nfrom pathlib import Path\np=Path('astropy/units/quantity.py')\ns=p.read_text()\nold='''        arrays = []\n        for input_, converter in zip(inputs, converters):\n            input_ = getattr(input_, \"value\", input_)\n            arrays.append(converter(input_) if converter else input_)'''\nif old in s:\n    new='''        arrays = []\n        for input_, converter in zip(inputs, converters):\n            input_ = getattr(input_, \"value\", input_)\n            if converter:\n                try:\n                    arrays.append(converter(input_))\n                except (ValueError, TypeError, UnitsError, UnitTypeError, UnitConversionError):\n                    return NotImplemented\n            else:\n                arrays.append(input_)'''\n    s=s.replace(old,new)\n    p.write_text(s)\n    print('patched quantity.py')\nelse:\n    print('pattern not found; no changes made')\n\n# Run reproduction script\nprint('\\\\nRunning reproduction test...')\nimport dataclasses, numpy as np, astropy.units as u\n@dataclasses.dataclass\nclass DuckArray(np.lib.mixins.NDArrayOperatorsMixin):\n    ndarray: u.Quantity\n    @property\n    def unit(self): return self.ndarray.unit\n    def __array_ufunc__(self, function, method, *inputs, **kwargs):\n        inputs=[inp.ndarray if isinstance(inp,DuckArray) else inp for inp in inputs]\n        for inp in inputs:\n            if isinstance(inp, np.ndarray):\n                result=inp.__array_ufunc__(function, method, *inputs, **kwargs)\n                if result is not NotImplemented:\n                    return DuckArray(result)\n        return NotImplemented\n\ntry:\n    print('Left Quantity + Right DuckArray:')\n    print((1*u.m) + DuckArray(u.Quantity(1, u.mm)))\nexcept Exception as e:\n    print('Raised:', type(e).__name__, e)\n\ntry:\n    print('\\\\nLeft DuckArray + Right Quantity:')\n    print(DuckArray(u.Quantity(1, u.mm)) + (1*u.m))\nexcept Exception as e:\n    print('Raised:', type(e).__name__, e)\n\ntry:\n    print('\\\\nSame-units add (should work):')\n    print(DuckArray(u.Quantity(1, u.mm)) + (1*u.mm))\nexcept Exception as e:\n    print('Raised:', type(e).__name__, e)\nPY"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "instance": "django__django-11265",
+  "commands": [
+    "ls -la",
+    "grep -RIn \"FilteredRelation\\|split_exclude\" -n django || true",
+    "nl -ba django/db/models/sql/query.py | sed -n '1,260p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1580,1680p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1680,1760p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '1120,1260p'",
+    "nl -ba django/db/models/sql/query.py | sed -n '880,1040p'",
+    "grep -RIn \"_filtered_relations\" -n django || true",
+    "nl -ba django/db/models/sql/query.py | sed -n '300,360p'",
+    "python - <<'PY'\nfrom pathlib import Path\np=Path('django/db/models/sql/query.py')\ns=p.read_text()\nold='        query = Query(self.model)'\nnew=old+\"\"\"\n        # Preserve annotations and filtered relations so filters referencing\n        # annotated FilteredRelation aliases work in subqueries.\n        query.annotations = self.annotations.copy()\n        query._filtered_relations = self._filtered_relations.copy()\n\"\"\"\nif old in s:\n    s=s.replace(old,new,1)\n    p.write_text(s)\n    print(\"Patched django/db/models/sql/query.py\")\nelse:\n    print(\"Pattern not found; no changes made\")\nPY",
+    "python -m unittest tests.filtered_relation.tests -v",
+    "python tests/runtests.py tests.filtered_relation.tests -v 2",
+    "python tests/runtests.py tests.filtered_relation -v 2",
+    "ls -la tests | sed -n '1,200p'",
+    "nl -ba tests/filtered_relation/models.py | sed -n '1,200p'",
+    "cat <<'PY' > run_filtered_relation_check.py && python run_filtered_relation_check.py\nimport sys\nfrom django.conf import settings\nsettings.configure(\n    INSTALLED_APPS=[\n        'django.contrib.contenttypes',\n        'tests.filtered_relation',\n    ],\n    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},\n    MIDDLEWARE=[],\n    SECRET_KEY='test',\n    USE_TZ=False,\n)\nimport django\ndjango.setup()\nfrom django.db.models import Q\nfrom django.db.models.query_utils import FilteredRelation\nfrom tests.filtered_relation.models import Author\n\ndef try_query(qs_callable, name):\n    try:\n        qs = qs_callable()\n        # Accessing qs.query will build the query without hitting the DB.\n        print(f\"{name}: OK\")\n        print(str(qs.query))\n    except Exception as e:\n        print(f\"{name}: ERROR -> {e!r}\")\n\ncond = Q(book__title__iexact='poem by alice')\ndef q_filter():\n    return Author.objects.annotate(\n        book_alice=FilteredRelation('book', condition=cond),\n    ).filter(book_alice__isnull=False)\n\ndef q_exclude():\n    return Author.objects.annotate(\n        book_alice=FilteredRelation('book', condition=cond),\n    ).exclude(book_alice__isnull=False)\n\ntry_query(q_filter, \"filter(with FilteredRelation)\")\ntry_query(q_exclude, \"exclude(with FilteredRelation)\")\nPY",
+    "python -m unittest tests.filtered_relation.tests.FilteredRelationTests.test_with_join -v"
+  ]
+}

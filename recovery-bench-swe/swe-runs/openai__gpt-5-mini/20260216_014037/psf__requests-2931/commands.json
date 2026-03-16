@@ -1,0 +1,12 @@
+{
+  "instance": "psf__requests-2931",
+  "commands": [
+    "ls -la",
+    "grep -R \"to_native_string\" -n .",
+    "nl -ba requests/utils.py | sed -n '650,760p'",
+    "nl -ba requests/models.py | sed -n '1,220p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('requests/models.py')\ntext = p.read_text()\nold = \"        if isinstance(data, (str, bytes)):\\n            return to_native_string(data)\"\nif old in text:\n    new = \"        if isinstance(data, str):\\n            return to_native_string(data)\\n        elif isinstance(data, bytes):\\n            return data\"\n    text = text.replace(old, new, 1)\n    p.write_text(text)\n    print(\"patched requests/models.py\")\nelse:\n    print(\"pattern not found; no change made\")\nPY",
+    "python - <<'PY'\nfrom requests.models import RequestEncodingMixin\ns = RequestEncodingMixin._encode_params(\"abc\")\nb = RequestEncodingMixin._encode_params(u\"\u00f6\".encode(\"utf-8\"))\nprint(\"str result:\", type(s).__name__, s)\nprint(\"bytes result:\", type(b).__name__, b)\nassert isinstance(s, str), \"Expected str for str input\"\nassert isinstance(b, bytes), \"Expected bytes for bytes input\"\nprint(\"OK\")\nPY",
+    "python - <<'PY'\nfrom requests import Request, Session\ndata = u\"\u00f6\u00f6\u00f6\".encode(\"utf-8\")\nreq = Request('PUT', 'http://httpbin.org/put', data=data)\ns = Session()\nprepped = s.prepare_request(req)\nprint(\"prepared body type:\", type(prepped.body).__name__)\nprint(\"prepared body repr:\", repr(prepped.body))\nassert isinstance(prepped.body, (bytes, bytearray)), \"Body should be bytes\"\nprint(\"OK\")\nPY"
+  ]
+}

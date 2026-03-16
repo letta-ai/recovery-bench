@@ -1,0 +1,25 @@
+{
+  "instance": "psf__requests-6028",
+  "commands": [
+    "ls -la",
+    "grep -RIn \"proxy\" -n requests || true",
+    "nl -ba requests/adapters.py | sed -n '1,260p'",
+    "nl -ba requests/adapters.py | sed -n '360,420p'",
+    "nl -ba requests/auth.py | sed -n '1,260p'",
+    "nl -ba requests/_internal_utils.py | sed -n '1,240p'",
+    "nl -ba requests/utils.py | sed -n '1,220p'",
+    "grep -n \"def get_auth_from_url\" -n requests -R || true",
+    "nl -ba requests/utils.py | sed -n '980,1020p'",
+    "grep -RIn \"Proxy-Authorization\\\\|proxy_auth\\\\|proxy\" tests || true",
+    "PYTHONPATH=. python3 - <<'PY'\nfrom requests.adapters import HTTPAdapter\nprint(HTTPAdapter().proxy_headers(\"http://user:pass@httpbin.org\"))\nPY",
+    "python3 - <<'PY'\nimport io,sys,re\npfile = 'requests/utils.py'\ns = open(pfile, 'r', encoding='utf-8').read()\nnew_fn = \"\"\"def get_auth_from_url(url):\n    \\\"\\\"\\\"Given a url with authentication components, extract them into a tuple of\n    username,password.\n\n    :rtype: (str,str)\n    \\\"\\\"\\\"\n    parsed = urlparse(url)\n\n    # parsed.username/password may be None when absent; only unquote when present.\n    username = parsed.username if parsed.username is not None else ''\n    password = parsed.password if parsed.password is not None else ''\n\n    if username:\n        username = unquote(username)\n    if password:\n        password = unquote(password)\n\n    return (username, password)\"\"\"\ns2 = re.sub(r\"def get_auth_from_url\\\\(url\\\\):[\\\\s\\\\S]*?return auth\", new_fn, s, count=1)\nif s==s2:\n    sys.stderr.write(\"Pattern not found; aborting\\\\n\")\n    sys.exit(1)\nopen(pfile,'w',encoding='utf-8').write(s2)\nprint(\"patched\", pfile)\n\n# quick verification\nimport os\nos.environ.pop('PYTHONPATH', None)\nfrom requests.adapters import HTTPAdapter\nfor url in (\"http://user:pass@httpbin.org\", \"http://user:@httpbin.org\", \"http://user@httpbin.org\"):\n    print(url, \"->\", HTTPAdapter().proxy_headers(url))\nPY",
+    "python3 - <<'PY'\nfrom pathlib import Path\np = Path('requests/utils.py')\ns = p.read_text(encoding='utf-8')\nstart = s.find('def get_auth_from_url(url):')\nif start == -1:\n    raise SystemExit('get_auth_from_url not found')\n# Find the end marker that follows the function in this file\nend_marker = '\\n\\n# Moved outside of function'\nend = s.find(end_marker, start)\nif end == -1:\n    raise SystemExit('end marker not found')\nnew_fn = \"\"\"def get_auth_from_url(url):\n    \\\"\\\"\\\"Given a url with authentication components, extract them into a tuple of\n    username,password.\n\n    :rtype: (str,str)\n    \\\"\\\"\\\"\n    parsed = urlparse(url)\n\n    # parsed.username/password may be None when absent; only unquote when present.\n    username = parsed.username if parsed.username is not None else ''\n    password = parsed.password if parsed.password is not None else ''\n\n    if username:\n        username = unquote(username)\n    if password:\n        password = unquote(password)\n\n    return (username, password)\"\"\"\ns2 = s[:start] + new_fn + s[end:]\np.write_text(s2, encoding='utf-8')\nprint('patched requests/utils.py')\nPY\n&& PYTHONPATH=. python3 - <<'PY'\nfrom requests.adapters import HTTPAdapter\nfor url in (\"http://user:pass@httpbin.org\", \"http://user:@httpbin.org\", \"http://user@httpbin.org\"):\n    print(url, \"->\", HTTPAdapter().proxy_headers(url))\nPY",
+    "PYTHONPATH=. python3 - <<'PY'\nfrom requests.adapters import HTTPAdapter\nfor url in (\"http://user:pass@httpbin.org\", \"http://user:@httpbin.org\", \"http://user@httpbin.org\"):\n    print(url, \"->\", HTTPAdapter().proxy_headers(url))\nPY",
+    "pytest -q tests/test_requests.py::HTTPAdapterTest::test_proxy_auth -q",
+    "nl -ba tests/test_requests.py | sed -n '1876,1898p'",
+    "pytest -q tests/test_requests.py::test_proxy_auth tests/test_requests.py::test_proxy_auth_empty_pass -q",
+    "nl -ba tests/test_requests.py | sed -n '1760,1896p'",
+    "grep -n \"^class \" tests/test_requests.py || true",
+    "pytest -q tests/test_requests.py::TestRequests::test_proxy_auth tests/test_requests.py::TestRequests::test_proxy_auth_empty_pass"
+  ]
+}

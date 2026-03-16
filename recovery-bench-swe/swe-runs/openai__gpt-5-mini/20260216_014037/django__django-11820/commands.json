@@ -1,0 +1,16 @@
+{
+  "instance": "django__django-11820",
+  "commands": [
+    "ls -la",
+    "grep -R \"E015\" -n django || true",
+    "nl -ba django/db/models/base.py | sed -n '1670,1760p'",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('django/db/models/base.py')\ns = p.read_text()\nold = (\n    \"                except (FieldDoesNotExist, AttributeError):\\n\"\n    \"                    if fld is None or fld.get_transform(part) is None:\\n\"\n    \"                        errors.append(\\n\"\n    \"                            checks.Error(\\n\"\n    \"                                \\\"'ordering' refers to the nonexistent field, \\\"\\n\"\n    \"                                \\\"related field, or lookup '%s'.\\\" % field,\\n\"\n    \"                                obj=cls,\\n\"\n    \"                                id='models.E015',\\n\"\n    \"                            )\\n\"\n    \"                        )\\n\"\n)\nif old in s:\n    new = (\n        \"                except (FieldDoesNotExist, AttributeError):\\n\"\n        \"                    # Allow ordering by related model's primary key using 'pk'.\\n\"\n        \"                    # 'pk' is an alias for the primary key and won't be found\\n\"\n        \"                    # by _meta.get_field, so handle it specially.\\n\"\n        \"                    if part == 'pk':\\n\"\n        \"                        fld = getattr(_cls._meta, 'pk', None)\\n\"\n        \"                        continue\\n\"\n        \"                    if fld is None or fld.get_transform(part) is None:\\n\"\n        \"                        errors.append(\\n\"\n        \"                            checks.Error(\\n\"\n        \"                                \\\"'ordering' refers to the nonexistent field, \\\"\\n\"\n        \"                                \\\"related field, or lookup '%s'.\\\" % field,\\n\"\n        \"                                obj=cls,\\n\"\n        \"                                id='models.E015',\\n\"\n        \"                            )\\n\"\n        \"                        )\\n\"\n    )\n    s2 = s.replace(old, new, 1)\n    p.write_text(s2)\n    print(\"modified\")\nelse:\n    print(\"pattern not found\")\nPY",
+    "grep -R \"models.E015\" -n tests || true",
+    "nl -ba tests/invalid_models_tests/test_models.py | sed -n '680,840p'",
+    "pytest -q tests/invalid_models_tests/test_models.py::ModelsTests::test_ordering_pointing_to_missing_related_model_field -q",
+    "nl -ba django/db/models/base.py | sed -n '1698,1728p'",
+    "python -m py_compile django/db/models/base.py",
+    "grep -R \"'__pk'\\\\|\\\"__pk\\\"\\\\|'__pk'\\\\|\\\"pk'\\\\|\\\"pk\\\" -n tests || true",
+    "grep -R \"__pk\" -n tests || true"
+  ]
+}

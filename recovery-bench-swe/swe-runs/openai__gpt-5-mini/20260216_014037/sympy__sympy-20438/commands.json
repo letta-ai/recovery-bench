@@ -1,0 +1,18 @@
+{
+  "instance": "sympy__sympy-20438",
+  "commands": [
+    "ls -la",
+    "grep -R \"def is_subset\" -n sympy || true",
+    "nl -ba sympy/sets/sets.py | sed -n '300,420p'",
+    "nl -ba sympy/sets/handlers/issubset.py | sed -n '1,240p'",
+    "grep -R \"class ProductSet\" -n sympy || true",
+    "nl -ba sympy/sets/sets.py | sed -n '660,840p'",
+    "grep -n \"FiniteSet\" -n sympy/sets/handlers/issubset.py | sed -n '1,200p'",
+    "grep -n \"is_subset\" sympy/sets -R || true",
+    "nl -ba sympy/sets/sets.py | sed -n '1840,1970p'",
+    "python - <<'PY'\nfrom sympy import FiniteSet, ProductSet, Tuple\na = FiniteSet(1,2)\nb = ProductSet(a, a)\nc = FiniteSet((1,1),(1,2),(2,1),(2,2))\nprint(\"b:\", b)\nprint(\"c:\", c)\nprint(\"elements of c types:\", [type(e) for e in c])\nprint(\"isinstance of sympy Tuple for first element:\", isinstance(list(c)[0], Tuple))\nprint(\"b._contains on first element of c:\", b._contains(list(c)[0]))\nprint(\"b.is_subset(c):\", b.is_subset(c))\nprint(\"c.is_subset(b):\", c.is_subset(b))\nPY",
+    "python - <<'PY'\nfrom pathlib import Path\np = Path('sympy/sets/handlers/issubset.py')\ns = p.read_text()\ns = s.replace(\"from sympy.sets.sets import FiniteSet, Interval, Set, Union\",\n              \"from sympy.sets.sets import FiniteSet, Interval, Set, Union, ProductSet\")\nif \"def is_subset_sets(a_prod, b_fset):\" not in s:\n    s += \"\"\"\n\n@dispatch(ProductSet, FiniteSet)  # type: ignore # noqa:F811\ndef is_subset_sets(a_prod, b_fset): # noqa:F811\n    \\\"\\\"\\\"Check if a ProductSet is subset of a FiniteSet.\\\"\\\"\\\"\n    # If any factor is known to be infinite then the product cannot be\n    # a subset of a finite set.\n    if any(s.is_finite_set is False for s in a_prod.sets):\n        return False\n    # If any factor's finiteness is unknown, we cannot decide.\n    if any(s.is_finite_set is None for s in a_prod.sets):\n        return None\n    # Compute product size; if it exceeds the size of the finite set,\n    # it cannot be a subset.\n    try:\n        size = 1\n        for s in a_prod.sets:\n            size *= len(s)\n    except Exception:\n        return None\n    if size > len(b_fset):\n        return False\n    # Finally, check that every tuple in the Cartesian product is an element\n    # of the finite set.\n    from itertools import product as _product\n    from sympy import Tuple\n    lists = [list(s) for s in a_prod.sets]\n    for t in _product(*lists):\n        if Tuple(*t) not in b_fset:\n            return False\n    return True\n\"\"\"\np.write_text(s)\nprint(\"patched\")\nPY",
+    "python - <<'PY'\nfrom sympy import FiniteSet, ProductSet, Tuple\na = FiniteSet(1,2)\nb = ProductSet(a, a)\nc = FiniteSet((1,1),(1,2),(2,1),(2,2))\nprint(\"b.is_subset(c):\", b.is_subset(c))\nprint(\"c.is_subset(b):\", c.is_subset(b))\nPY",
+    "pytest -q sympy/sets/tests/test_sets.py::test_is_subset -q"
+  ]
+}
