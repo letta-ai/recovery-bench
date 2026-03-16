@@ -5,6 +5,11 @@ This agent extends LettaCode to:
 1. Find a failed trajectory matching the task (by instruction hash)
 2. Replay the commands from that trajectory to corrupt the environment
 3. Run LettaCode with a recovery instruction
+
+Variants:
+- RecoveryLettaCode: Environment-only recovery (no history of what was tried)
+- RecoveryLettaCodeWithHistory: Full operation history injected into the prompt
+- RecoveryLettaCodeWithSummary: LLM-summarized history injected into the prompt
 """
 
 import json
@@ -328,31 +333,39 @@ class RecoveryLettaCode(LettaCode):
     ) -> None:
         """
         Run the replay LettaCode agent.
-        
+
         1. Extract operations from failed trajectory (Bash, Write, Edit)
         2. Replay operations to corrupt the environment
-        3. Run LettaCode with recovery instruction
+        3. Build recovery instruction (subclasses can override _build_recovery_instruction)
+        4. Run LettaCode with recovery instruction
         """
         # 1. Extract operations from failed trajectory
-        operations = self._extract_operations_from_trajectory(instruction)
-        
-        if not operations:
+        self._replay_operations = self._extract_operations_from_trajectory(instruction)
+
+        if not self._replay_operations:
             logger.info("No operations found in trajectory, running LettaCode fresh")
         else:
             # 2. Replay operations to corrupt the environment
-            logger.info(f"Replaying {len(operations)} operations from previous trajectory...")
-            for i, op in enumerate(operations):
+            logger.info(f"Replaying {len(self._replay_operations)} operations from previous trajectory...")
+            for i, op in enumerate(self._replay_operations):
                 try:
                     await self._replay_operation(environment, op)
                 except Exception as e:
                     # Continue even if an operation fails
                     logger.error(f"Replay operation {i+1} ({op['tool']}) failed: {e}")
                     continue
-            
-            logger.info(f"Finished replaying {len(operations)} operations")
 
-        # 3. Create recovery instruction
-        recovery_instruction = (
+            logger.info(f"Finished replaying {len(self._replay_operations)} operations")
+
+        # 3. Build recovery instruction (hook for subclasses)
+        recovery_instruction = await self._build_recovery_instruction(instruction)
+
+        # 4. Run LettaCode with recovery instruction
+        await super().run(recovery_instruction, environment, context)
+
+    async def _build_recovery_instruction(self, instruction: str) -> str:
+        """Build the recovery instruction. Subclasses override to inject history."""
+        return (
             "RECOVERY MODE: The previous attempt to complete this task failed. "
             "The environment has been restored to the state after the failed attempt. "
             "Please analyze what went wrong and try a DIFFERENT approach.\n\n"
@@ -360,8 +373,31 @@ class RecoveryLettaCode(LettaCode):
             f"{instruction}"
         )
 
-        # 4. Run LettaCode with recovery instruction
-        await super().run(recovery_instruction, environment, context)
+    @staticmethod
+    def _format_operations_as_text(operations: list[dict]) -> str:
+        """Format extracted operations into a human-readable text log."""
+        lines = []
+        for i, op in enumerate(operations, 1):
+            tool = op["tool"]
+            args = op["args"]
+            if tool == "Bash":
+                lines.append(f"{i}. [Bash] {args.get('command', '')}")
+            elif tool == "Write":
+                path = args.get("file_path", "")
+                content = args.get("content", "")
+                preview = content[:200] + "..." if len(content) > 200 else content
+                lines.append(f"{i}. [Write] {path}\n   Content: {preview}")
+            elif tool == "Edit":
+                if "patch" in args:
+                    patch = args["patch"]
+                    preview = patch[:200] + "..." if len(patch) > 200 else patch
+                    lines.append(f"{i}. [Edit/Patch]\n   {preview}")
+                else:
+                    path = args.get("file_path", "")
+                    old = args.get("old_string", "")
+                    new = args.get("new_string", "")
+                    lines.append(f"{i}. [Edit] {path}\n   - {old!r}\n   + {new!r}")
+        return "\n".join(lines)
 
     async def _replay_operation(self, environment: BaseEnvironment, op: dict) -> None:
         """Replay a single operation (Bash, Write, or Edit) in the environment."""
@@ -424,3 +460,93 @@ class RecoveryLettaCode(LettaCode):
                     new_escaped = new_string.replace("\\", "\\\\").replace("/", "\\/").replace("&", "\\&").replace("\n", "\\n")
                     sed_cmd = f"sed -i 's/{old_escaped}/{new_escaped}/g' {shlex.quote(file_path)}"
                     await environment.exec(f"bash -lc {shlex.quote(sed_cmd)}", timeout_sec=30)
+
+
+class RecoveryLettaCodeWithHistory(RecoveryLettaCode):
+    """
+    Recovery agent that includes the full operation history in the instruction.
+
+    Analogous to RecoveryTerminus (full message history). Since LettaCode is
+    a CLI subprocess, we inject the history as formatted text in the prompt.
+    """
+
+    @staticmethod
+    def name() -> str:
+        return "recovery-letta-code-with-history"
+
+    async def _build_recovery_instruction(self, instruction: str) -> str:
+        ops_text = self._format_operations_as_text(self._replay_operations)
+        history_block = (
+            "\n\n--- PREVIOUS ATTEMPT OPERATIONS ---\n"
+            f"{ops_text}\n"
+            "--- END PREVIOUS ATTEMPT ---"
+        ) if ops_text else ""
+
+        return (
+            "RECOVERY MODE: The previous attempt to complete this task failed. "
+            "The environment has been restored to the state after the failed attempt. "
+            "Below is the full list of operations from the failed attempt. "
+            "Please analyze what went wrong and try a DIFFERENT approach.\n"
+            f"{history_block}\n\n"
+            "--- ORIGINAL TASK ---\n"
+            f"{instruction}"
+        )
+
+
+class RecoveryLettaCodeWithSummary(RecoveryLettaCode):
+    """
+    Recovery agent that includes an LLM-generated summary of the previous
+    attempt in the instruction.
+
+    Analogous to RecoveryTerminusWithMessageSummaries. Uses litellm to
+    summarize the failed trajectory operations before injecting into the prompt.
+    """
+
+    @staticmethod
+    def name() -> str:
+        return "recovery-letta-code-with-summary"
+
+    async def _build_recovery_instruction(self, instruction: str) -> str:
+        ops_text = self._format_operations_as_text(self._replay_operations)
+
+        if ops_text:
+            summary = await self._summarize_operations(ops_text)
+        else:
+            summary = "Previous attempts to complete this task failed."
+
+        return (
+            "RECOVERY MODE: The previous attempt to complete this task failed. "
+            "The environment has been restored to the state after the failed attempt. "
+            "Below is a summary of what was tried previously. "
+            "Please analyze what went wrong and try a DIFFERENT approach.\n\n"
+            f"--- SUMMARY OF PREVIOUS ATTEMPT ---\n"
+            f"{summary}\n"
+            f"--- END SUMMARY ---\n\n"
+            "--- ORIGINAL TASK ---\n"
+            f"{instruction}"
+        )
+
+    async def _summarize_operations(self, ops_text: str) -> str:
+        """Use an LLM to summarize the previous attempt's operations."""
+        from litellm import acompletion
+
+        prompt = (
+            "Below is a log of tool operations (Bash commands, file writes, file edits) "
+            "from a failed attempt to complete a coding task. Please provide a concise "
+            "summary focusing on:\n"
+            "1. What approach was taken\n"
+            "2. What files were modified\n"
+            "3. What likely went wrong\n\n"
+            f"{ops_text}"
+        )
+
+        try:
+            response = await acompletion(
+                model=self.model_name or "anthropic/claude-haiku-4-5-20251001",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=512,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.warning(f"Failed to summarize operations via LLM: {e}")
+            return "Previous attempts to complete this task failed."
