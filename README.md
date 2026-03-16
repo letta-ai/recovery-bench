@@ -13,13 +13,20 @@ Read more on our blog: [letta.com/blog/recovery-bench](https://www.letta.com/blo
 pip install -e .
 ```
 
-2. Set up your API keys:
+2. Install [Git LFS](https://git-lfs.com/) and pull the initial traces:
+```bash
+git lfs install
+git lfs pull
+```
+This fetches the initial haiku 4.5 traces in `runs/` used for recovery experiments.
+
+3. Set up your API keys:
 ```bash
 export ANTHROPIC_API_KEY="your-key"
 export OPENAI_API_KEY="your-key"
 ```
 
-3. Ensure Docker is installed and running.
+4. Ensure Docker is installed and running.
 
 ## Quick Start
 
