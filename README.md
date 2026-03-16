@@ -72,12 +72,14 @@ Options:
 - `--recovery-model`: Model name or JSON config for recovery (required for recovery, skips recovery if omitted)
 - `--task-id`: Specific task ID(s) to run (can be repeated)
 - `--recovery-agent`: Recovery agent import path
-- `--initial-agent`: Initial agent import path
+- `--initial-agent`: Initial agent import path (default: `terminus-2`)
 - `--n-concurrent`: Number of concurrent processes (default: 8)
 - `--max-iterations`: Maximum recovery iterations (default: 1)
-- `--run-initial`: Only run initial traces, skip recovery
 - `--resume-initial`: Path to existing traces (skips initial generation)
 - `--job-name`: Custom job name for recovery output
+- `--cleanup-container`: Cleanup Docker containers before running
+- `--dataset-version`: Dataset version for initial trace generation (e.g., `2.0`)
+- `--env`: Harbor sandbox backend (e.g., `docker`, `daytona`, `modal`)
 
 ## Agents
 
