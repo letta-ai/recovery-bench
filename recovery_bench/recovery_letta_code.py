@@ -7,7 +7,7 @@ This agent extends LettaCode to:
 3. Run LettaCode with a recovery instruction
 
 Variants (matching RecoveryTerminus naming):
-- RecoveryLettaCode: Full operation history injected into the prompt
+- RecoveryLettaCode: Full message history injected into the prompt
 - RecoveryLettaCodeWithoutMessages: Environment-only recovery (no history)
 - RecoveryLettaCodeWithMessageSummaries: LLM-summarized history injected into the prompt
 """
@@ -32,8 +32,8 @@ class RecoveryLettaCode(LettaCode):
     
     This agent:
     1. Finds a previous failed trajectory by hashing the instruction
-    2. Extracts and replays the commands to restore the corrupted state
-    3. Runs LettaCode with a modified instruction indicating recovery
+    2. Extracts and replays state-modifying operations to restore corrupted state
+    3. Injects prior message history and runs LettaCode in recovery mode
     """
 
     def __init__(self, *args, **kwargs):
@@ -93,17 +93,20 @@ class RecoveryLettaCode(LettaCode):
         logger.warning(f"No trajectory found for hash {task_hash} in {base_path}")
         return None
 
-    def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
-        """Extract state-modifying operations from a failed LettaCode trajectory.
-        
-        Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
+    def _extract_recovery_context_from_trajectory(self, instruction: str) -> tuple[list[dict], list[dict]]:
+        """Extract operations + message history from a failed trajectory.
+
+        Returns:
+            (operations, messages)
+            - operations: list[{"tool": "Bash|Write|Edit", "args": {...}}]
+            - messages: list[{"role": "user|assistant|system", "content": str}]
         """
         task_hash = create_task_hash(instruction)
         logger.debug(f"Looking for trajectory with hash: {task_hash}")
         
         trajectory_folder = self._find_trajectory_folder(task_hash)
         if trajectory_folder is None:
-            return []
+            return [], []
 
         events_file = self._find_events_file(trajectory_folder / "agent")
         if events_file:
@@ -118,15 +121,13 @@ class RecoveryLettaCode(LettaCode):
                 return self._parse_atif_trajectory(traj_path)
 
         logger.warning(f"No trajectory found in {trajectory_folder}")
-        return []
+        return [], []
 
-    def _parse_letta_events(self, events_file: Path) -> list[dict]:
-        """Parse LettaCode events JSONL to extract operations that modify state.
-        
-        Extracts Bash, Write, and Edit tool calls that could corrupt the environment.
-        Events are streamed as JSON fragments grouped by tool_call_id.
-        
-        Returns list of operation dicts: {"tool": "Bash|Write|Edit", "args": {...}}
+    def _parse_letta_events(self, events_file: Path) -> tuple[list[dict], list[dict]]:
+        """Parse LettaCode events JSONL to extract operations + messages.
+
+        - Operations are reconstructed from approval_request_message fragments.
+        - Messages are reconstructed from streamed assistant/user/system chunks.
         """
         logger.debug(f"Parsing LettaCode events from {events_file}")
         
@@ -134,6 +135,11 @@ class RecoveryLettaCode(LettaCode):
         tool_call_fragments: dict[str, list[str]] = {}
         tool_call_names: dict[str, str] = {}
         tool_call_order: list[str] = []  # Track order of first appearance
+
+        # Collect streamed message fragments by message id/otid
+        message_fragments: dict[str, list[tuple[int, str]]] = {}
+        message_roles: dict[str, str] = {}
+        message_order: list[str] = []
         
         try:
             with open(events_file, "r") as f:
@@ -146,8 +152,34 @@ class RecoveryLettaCode(LettaCode):
                     except json.JSONDecodeError:
                         continue
                     
+                    message_type = event.get("message_type")
+
+                    # Collect assistant/user/system message chunks
+                    if message_type in {"assistant_message", "user_message", "system_message"}:
+                        role_map = {
+                            "assistant_message": "assistant",
+                            "user_message": "user",
+                            "system_message": "system",
+                        }
+                        role = role_map.get(message_type)
+                        content = event.get("content")
+                        seq_raw = event.get("seq_id")
+                        if isinstance(seq_raw, int):
+                            seq_id = seq_raw
+                        elif isinstance(seq_raw, str) and seq_raw.isdigit():
+                            seq_id = int(seq_raw)
+                        else:
+                            seq_id = 0
+                        if role and isinstance(content, str):
+                            message_id = event.get("otid") or event.get("id") or f"seq-{seq_id}"
+                            if message_id not in message_fragments:
+                                message_fragments[message_id] = []
+                                message_roles[message_id] = role
+                                message_order.append(message_id)
+                            message_fragments[message_id].append((seq_id, content))
+
                     # Look for approval_request_message with tool_call
-                    if event.get("message_type") == "approval_request_message":
+                    if message_type == "approval_request_message":
                         tool_call = event.get("tool_call", {})
                         if not tool_call:
                             continue
@@ -164,11 +196,10 @@ class RecoveryLettaCode(LettaCode):
                             tool_call_fragments[tool_call_id].append(args_fragment)
         except Exception as e:
             logger.error(f"Error parsing events file: {e}")
-            return []
+            return [], []
 
         # Reconstruct and extract operations (Bash, Write, Edit)
         operations = []
-        import re
         
         # Tools that modify environment state (across all providers)
         # Anthropic: Bash, Write, Edit
@@ -212,15 +243,30 @@ class RecoveryLettaCode(LettaCode):
         write_count = sum(1 for op in operations if op["tool"] == "Write")
         edit_count = sum(1 for op in operations if op["tool"] == "Edit")
         logger.info(f"Extracted {len(operations)} operations: {bash_count} Bash, {write_count} Write, {edit_count} Edit")
-        return operations
 
-    def _parse_atif_trajectory(self, trajectory_file: Path) -> list[dict]:
-        """Parse ATIF trajectory.json (terminus-2 format) to extract Bash operations.
+        # Reconstruct full messages from streamed chunks
+        messages: list[dict] = []
+        for message_id in message_order:
+            role = message_roles.get(message_id)
+            fragments = message_fragments.get(message_id, [])
+            if not role or not fragments:
+                continue
+            fragments.sort(key=lambda x: x[0])
+            content = "".join(fragment for _, fragment in fragments)
+            if content:
+                messages.append({"role": role, "content": content})
+
+        logger.info(f"Extracted {len(messages)} messages from Letta events")
+        return operations, messages
+
+    def _parse_atif_trajectory(self, trajectory_file: Path) -> tuple[list[dict], list[dict]]:
+        """Parse ATIF trajectory.json to extract Bash operations + message history.
 
         Mirrors the parsing logic from RecoveryTerminus._parse_trajectory() but
         returns operations in the format expected by _replay_operation().
 
-        Returns list of operation dicts: {"tool": "Bash", "args": {"command": ...}}
+        Returns:
+            (operations, messages)
         """
         logger.debug(f"Parsing ATIF trajectory from {trajectory_file}")
 
@@ -229,17 +275,23 @@ class RecoveryLettaCode(LettaCode):
                 trajectory = json.load(f)
         except (json.JSONDecodeError, FileNotFoundError):
             logger.error(f"Failed to read ATIF trajectory: {trajectory_file}")
-            return []
+            return [], []
 
         operations = []
+        messages = []
         steps = trajectory.get("steps", trajectory)
 
         for step in steps:
             source = step.get("source", step.get("role", ""))
+            content = step.get("message", step.get("content", ""))
+
+            # Collect messages for context injection
+            role = "assistant" if source == "agent" else source
+            if role in ("user", "assistant", "system"):
+                messages.append({"role": role, "content": content})
+
             if source not in ("agent", "assistant"):
                 continue
-
-            content = step.get("message", step.get("content", ""))
 
             # Extract commands from tool_calls (ATIF v1.5+)
             tool_calls = step.get("tool_calls", [])
@@ -267,7 +319,8 @@ class RecoveryLettaCode(LettaCode):
                     pass
 
         logger.info(f"Extracted {len(operations)} Bash operations from ATIF trajectory")
-        return operations
+        logger.info(f"Extracted {len(messages)} messages from ATIF trajectory")
+        return operations, messages
 
     def _extract_args_regex(self, tool_name: str, full_args: str) -> dict | None:
         """Extract tool arguments using regex for incomplete JSON.
@@ -339,8 +392,8 @@ class RecoveryLettaCode(LettaCode):
         3. Build recovery instruction (subclasses can override _build_recovery_instruction)
         4. Run LettaCode with recovery instruction
         """
-        # 1. Extract operations from failed trajectory
-        self._replay_operations = self._extract_operations_from_trajectory(instruction)
+        # 1. Extract operations + messages from failed trajectory
+        self._replay_operations, self._replay_messages = self._extract_recovery_context_from_trajectory(instruction)
 
         if not self._replay_operations:
             logger.info("No operations found in trajectory, running LettaCode fresh")
@@ -364,18 +417,18 @@ class RecoveryLettaCode(LettaCode):
         await super().run(recovery_instruction, environment, context)
 
     async def _build_recovery_instruction(self, instruction: str) -> str:
-        """Build recovery instruction with full prior operation history."""
-        ops_text = self._format_operations_as_text(self._replay_operations)
+        """Build recovery instruction with full prior message history."""
+        messages_text = self._format_messages_as_text(self._replay_messages)
         history_block = (
-            "\n\n--- PREVIOUS ATTEMPT OPERATIONS ---\n"
-            f"{ops_text}\n"
+            "\n\n--- PREVIOUS ATTEMPT MESSAGES ---\n"
+            f"{messages_text}\n"
             "--- END PREVIOUS ATTEMPT ---"
-        ) if ops_text else ""
+        ) if messages_text else ""
 
         return (
             "RECOVERY MODE: The previous attempt to complete this task failed. "
             "The environment has been restored to the state after the failed attempt. "
-            "Below is the full list of operations from the failed attempt. "
+            "Below is the full message history from the failed attempt. "
             "Please analyze what went wrong and try a DIFFERENT approach.\n"
             f"{history_block}\n\n"
             "--- ORIGINAL TASK ---\n"
@@ -407,6 +460,17 @@ class RecoveryLettaCode(LettaCode):
                     new = args.get("new_string", "")
                     lines.append(f"{i}. [Edit] {path}\n   - {old!r}\n   + {new!r}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_messages_as_text(messages: list[dict]) -> str:
+        """Format prior messages into role-tagged text for prompt injection."""
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "assistant")
+            content = msg.get("content", "")
+            if content:
+                lines.append(f"[{role}] {content}")
+        return "\n\n".join(lines)
 
     async def _replay_operation(self, environment: BaseEnvironment, op: dict) -> None:
         """Replay a single operation (Bash, Write, or Edit) in the environment."""
@@ -495,7 +559,7 @@ class RecoveryLettaCodeWithoutMessages(RecoveryLettaCode):
 class RecoveryLettaCodeWithMessageSummaries(RecoveryLettaCode):
     """
     Recovery agent that includes an LLM-generated summary of the previous
-    attempt in the instruction.
+    attempt's message history in the instruction.
 
     Analogous to RecoveryTerminusWithMessageSummaries.
     """
@@ -505,10 +569,10 @@ class RecoveryLettaCodeWithMessageSummaries(RecoveryLettaCode):
         return "recovery-letta-code-with-message-summaries"
 
     async def _build_recovery_instruction(self, instruction: str) -> str:
-        ops_text = self._format_operations_as_text(self._replay_operations)
+        messages_text = self._format_messages_as_text(self._replay_messages)
 
-        if ops_text:
-            summary = await self._summarize_operations(ops_text)
+        if messages_text:
+            summary = await self._summarize_messages(messages_text)
         else:
             summary = "Previous attempts to complete this task failed."
 
@@ -524,18 +588,18 @@ class RecoveryLettaCodeWithMessageSummaries(RecoveryLettaCode):
             f"{instruction}"
         )
 
-    async def _summarize_operations(self, ops_text: str) -> str:
-        """Use an LLM to summarize the previous attempt's operations."""
+    async def _summarize_messages(self, messages_text: str) -> str:
+        """Use an LLM to summarize the previous attempt's messages."""
         from litellm import acompletion
 
         prompt = (
-            "Below is a log of tool operations (Bash commands, file writes, file edits) "
-            "from a failed attempt to complete a coding task. Please provide a concise "
+            "Below is the full conversation history from a failed attempt to complete a coding task. "
+            "Please provide a concise "
             "summary focusing on:\n"
             "1. What approach was taken\n"
             "2. What files were modified\n"
             "3. What likely went wrong\n\n"
-            f"{ops_text}"
+            f"{messages_text}"
         )
 
         try:
@@ -546,5 +610,5 @@ class RecoveryLettaCodeWithMessageSummaries(RecoveryLettaCode):
             )
             return response.choices[0].message.content
         except Exception as e:
-            logger.warning(f"Failed to summarize operations via LLM: {e}")
+            logger.warning(f"Failed to summarize messages via LLM: {e}")
             return "Previous attempts to complete this task failed."
