@@ -127,74 +127,37 @@ def is_hash_prefixed_directory(task_name: str) -> bool:
 
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
-    """Extract instruction from task directory.
-    
-    Supports:
-    - ATIF trajectory.json (terminus-2)
-    - LettaCode run_script.sh
-    """
+    """Extract instruction from an ATIF trajectory.json in a task directory."""
     agent_dir = task_dir / "agent"
-    
-    # Try LettaCode run_script.sh
-    if agent_dir.exists():
-        run_script = agent_dir / "run_script.sh"
-        if run_script.exists():
-            instruction = _extract_instruction_from_letta_script(run_script)
-            if instruction:
-                return instruction
-    
-    # Try ATIF trajectory.json
     trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
     if not trajectory_file or not trajectory_file.exists():
         trajectory_file = task_dir / "trajectory.json"
-    if trajectory_file and trajectory_file.exists():
-        return _extract_instruction_from_atif(trajectory_file)
-    
-    return None
+    if not trajectory_file or not trajectory_file.exists():
+        return None
 
-
-def _extract_instruction_from_letta_script(run_script: Path) -> str | None:
-    """Extract instruction from LettaCode run_script.sh."""
-    import re
-    try:
-        content = run_script.read_text()
-        # Match -p followed by quoted string
-        match = re.search(r"-p\s+'((?:[^'\\]|\\.)*)'", content)
-        if match:
-            return match.group(1).replace("'\"'\"'", "'")
-        match = re.search(r'-p\s+"((?:[^"\\]|\\.)*)"', content)
-        if match:
-            return match.group(1).replace('\\"', '"').replace("\\n", "\n")
-    except Exception:
-        pass
-    return None
-
-
-def _extract_instruction_from_atif(trajectory_file: Path) -> str | None:
-    """Extract instruction from ATIF trajectory.json."""
     try:
         with open(trajectory_file, "r") as f:
             trajectory = json.load(f)
-        
+
         full_message = None
-        
+
         # ATIF v1.5 format: steps array with source field
         if "steps" in trajectory:
             for step in trajectory["steps"]:
                 if step.get("source") == "user":
                     full_message = step.get("message", "")
                     break
-        
+
         # Fallback: old format with role field
         if not full_message:
             for step in trajectory:
                 if step.get("role") == "user":
                     full_message = step.get("content", "")
                     break
-        
+
         if not full_message:
             return None
-        
+
         # Strip terminus-2 system prompt - task description comes after "Task Description:\n"
         task_marker = "Task Description:\n"
         if task_marker in full_message:
@@ -204,7 +167,7 @@ def _extract_instruction_from_atif(trajectory_file: Path) -> str | None:
             if terminal_marker in task_part:
                 task_part = task_part.split(terminal_marker, 1)[0]
             return task_part
-        
+
         return full_message
     except (json.JSONDecodeError, FileNotFoundError):
         return None
