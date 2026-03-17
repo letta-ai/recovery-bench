@@ -2,7 +2,7 @@
 RecoveryLettaCode - LettaCode agent that replays failed ATIF trajectories before running.
 
 This agent extends LettaCode to:
-1. Find a failed ATIF trajectory matching the task (by instruction hash)
+1. Find a failed ATIF trajectory matching the task (by task name from logs_dir)
 2. Replay the bash commands from that trajectory to corrupt the environment
 3. Run LettaCode with a recovery instruction
 """
@@ -17,7 +17,6 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from recovery_bench.letta_code_agent import LettaCode
-from recovery_bench.utils import create_task_hash
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ class RecoveryLettaCode(LettaCode):
     LettaCode agent that replays a failed ATIF trajectory before running.
 
     This agent:
-    1. Finds a previous failed trajectory by hashing the instruction
+    1. Finds a previous failed trajectory by task name (from logs_dir)
     2. Replays bash commands to restore the corrupted state
     3. Runs LettaCode with a modified instruction indicating recovery
     """
@@ -40,34 +39,78 @@ class RecoveryLettaCode(LettaCode):
     def name() -> str:
         return "recovery-letta-code"
 
-    def _find_trajectory_folder(self, task_hash: str) -> Path | None:
-        """Find the trajectory folder based on task hash prefix."""
+    async def setup(self, environment: BaseEnvironment) -> None:
+        """Install LettaCode, then replay the failed trajectory."""
+        await super().setup(environment)
+
+        operations = self._extract_operations_from_trajectory()
+        if not operations:
+            logger.info("No operations found in trajectory, will run LettaCode fresh")
+            return
+
+        logger.info(f"Replaying {len(operations)} operations from previous trajectory...")
+        for i, op in enumerate(operations):
+            try:
+                await self._replay_operation(environment, op)
+            except Exception as e:
+                logger.error(f"Replay operation {i+1} ({op['tool']}) failed: {e}")
+                continue
+        logger.info(f"Finished replaying {len(operations)} operations")
+
+    def _get_task_name(self) -> str | None:
+        """Extract task name from logs_dir path.
+
+        logs_dir is like: .../job-name/task-name__suffix/agent
+        """
+        if not self.logs_dir:
+            return None
+        task_dir_name = Path(self.logs_dir).parent.name
+        if "__" in task_dir_name:
+            return task_dir_name.rsplit("__", 1)[0]
+        return task_dir_name
+
+    def _find_trajectory_folder(self) -> Path | None:
+        """Find the trajectory folder for this task by matching task name."""
+        task_name = self._get_task_name()
+        if not task_name:
+            logger.warning("Could not extract task name from logs_dir")
+            return None
+
         base_path = Path(self._trajectory_folder)
 
         if not base_path.exists():
             logger.warning(f"Trajectory folder not found: {base_path}")
             return None
 
-        # Look for hash-prefixed directories (format: <hash>-<task-id>__<suffix>/)
         for item in base_path.iterdir():
-            if item.is_dir() and item.name.startswith(f"{task_hash}-"):
+            if not item.is_dir():
+                continue
+            # Dir format: <hash>-<task-name>__<suffix>
+            dir_name = item.name
+            # Strip hash prefix (8 hex chars + dash)
+            if len(dir_name) > 9 and dir_name[8] == "-":
+                dir_task = dir_name[9:]
+            else:
+                dir_task = dir_name
+            # Strip __suffix
+            if "__" in dir_task:
+                dir_task = dir_task.rsplit("__", 1)[0]
+
+            if dir_task == task_name:
                 for traj_path in [item / "agent" / "trajectory.json", item / "trajectory.json"]:
                     if traj_path.exists():
-                        logger.debug(f"Found ATIF trajectory for hash {task_hash}: {item}")
+                        logger.debug(f"Found trajectory for task {task_name}: {item}")
                         return item
 
-        logger.warning(f"No trajectory found for hash {task_hash} in {base_path}")
+        logger.warning(f"No trajectory found for task {task_name} in {base_path}")
         return None
 
-    def _extract_operations_from_trajectory(self, instruction: str) -> list[dict]:
+    def _extract_operations_from_trajectory(self) -> list[dict]:
         """Extract bash commands from a failed ATIF trajectory.
 
         Returns list of operation dicts: {"tool": "Bash", "args": {"command": ...}}
         """
-        task_hash = create_task_hash(instruction)
-        logger.debug(f"Looking for trajectory with hash: {task_hash}")
-
-        trajectory_folder = self._find_trajectory_folder(task_hash)
+        trajectory_folder = self._find_trajectory_folder()
         if trajectory_folder is None:
             return []
 
@@ -142,32 +185,7 @@ class RecoveryLettaCode(LettaCode):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        """
-        Run the replay LettaCode agent.
-
-        1. Extract bash commands from failed ATIF trajectory
-        2. Replay commands to corrupt the environment
-        3. Run LettaCode with recovery instruction
-        """
-        # 1. Extract operations from failed trajectory
-        operations = self._extract_operations_from_trajectory(instruction)
-        
-        if not operations:
-            logger.info("No operations found in trajectory, running LettaCode fresh")
-        else:
-            # 2. Replay operations to corrupt the environment
-            logger.info(f"Replaying {len(operations)} operations from previous trajectory...")
-            for i, op in enumerate(operations):
-                try:
-                    await self._replay_operation(environment, op)
-                except Exception as e:
-                    # Continue even if an operation fails
-                    logger.error(f"Replay operation {i+1} ({op['tool']}) failed: {e}")
-                    continue
-            
-            logger.info(f"Finished replaying {len(operations)} operations")
-
-        # 3. Create recovery instruction
+        """Prepend recovery prompt, then delegate to LettaCode."""
         recovery_instruction = (
             "RECOVERY MODE: The previous attempt to complete this task failed. "
             "The environment has been restored to the state after the failed attempt. "
@@ -175,8 +193,6 @@ class RecoveryLettaCode(LettaCode):
             "--- ORIGINAL TASK ---\n"
             f"{instruction}"
         )
-
-        # 4. Run LettaCode with recovery instruction
         await super().run(recovery_instruction, environment, context)
 
     async def _replay_operation(self, environment: BaseEnvironment, op: dict) -> None:
