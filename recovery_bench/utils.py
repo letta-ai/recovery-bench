@@ -127,46 +127,13 @@ def is_hash_prefixed_directory(task_name: str) -> bool:
 
 
 def extract_instruction_from_trajectory(task_dir: Path) -> str | None:
-    """Extract instruction from task directory.
-    
-    Supports:
-    - ATIF trajectory.json (terminus-2)
-    - LettaCode run_script.sh
-    """
+    """Extract instruction from task directory (ATIF trajectory.json)."""
     agent_dir = task_dir / "agent"
-    
-    # Try LettaCode run_script.sh
-    if agent_dir.exists():
-        run_script = agent_dir / "run_script.sh"
-        if run_script.exists():
-            instruction = _extract_instruction_from_letta_script(run_script)
-            if instruction:
-                return instruction
-    
-    # Try ATIF trajectory.json
     trajectory_file = agent_dir / "trajectory.json" if agent_dir.exists() else None
     if not trajectory_file or not trajectory_file.exists():
         trajectory_file = task_dir / "trajectory.json"
     if trajectory_file and trajectory_file.exists():
         return _extract_instruction_from_atif(trajectory_file)
-    
-    return None
-
-
-def _extract_instruction_from_letta_script(run_script: Path) -> str | None:
-    """Extract instruction from LettaCode run_script.sh."""
-    import re
-    try:
-        content = run_script.read_text()
-        # Match -p followed by quoted string
-        match = re.search(r"-p\s+'((?:[^'\\]|\\.)*)'", content)
-        if match:
-            return match.group(1).replace("'\"'\"'", "'")
-        match = re.search(r'-p\s+"((?:[^"\\]|\\.)*)"', content)
-        if match:
-            return match.group(1).replace('\\"', '"').replace("\\n", "\n")
-    except Exception:
-        pass
     return None
 
 
