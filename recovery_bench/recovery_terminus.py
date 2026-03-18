@@ -25,7 +25,7 @@ from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
-from recovery_bench.utils import save_usage
+from recovery_bench.utils import find_trajectory_folder, save_usage
 
 logger = logging.getLogger(__name__)
 
@@ -158,56 +158,9 @@ class RecoveryTerminus(Terminus2):
 
     # ===== Trajectory replay helpers =====
 
-    def _get_task_name(self) -> str | None:
-        """Extract task name from logs_dir path.
-
-        logs_dir is like: .../job-name/task-name__suffix/agent
-        """
-        if not self.logs_dir:
-            return None
-        task_dir_name = Path(self.logs_dir).parent.name
-        if "__" in task_dir_name:
-            return task_dir_name.rsplit("__", 1)[0]
-        return task_dir_name
-
-    def _find_trajectory_folder(self) -> Path | None:
-        """Find the trajectory folder for this task in the traces directory."""
-        task_name = self._get_task_name()
-        if not task_name:
-            logger.warning("Could not extract task name from logs_dir")
-            return None
-
-        base_path = Path(self._base_folder)
-        if not base_path.exists():
-            logger.warning(f"Trajectory folder not found: {base_path}")
-            return None
-
-        for item in base_path.iterdir():
-            if not item.is_dir():
-                continue
-            # Dir format: <hash>-<task-name>__<suffix>
-            dir_name = item.name
-            # Strip hash prefix (8 hex chars + dash)
-            if len(dir_name) > 9 and dir_name[8] == "-":
-                dir_task = dir_name[9:]
-            else:
-                dir_task = dir_name
-            # Strip __suffix
-            if "__" in dir_task:
-                dir_task = dir_task.rsplit("__", 1)[0]
-
-            if dir_task == task_name:
-                for traj_path in [item / "agent" / "trajectory.json", item / "trajectory.json"]:
-                    if traj_path.exists():
-                        logger.debug(f"Found trajectory for task {task_name}: {item}")
-                        return item
-
-        logger.warning(f"No trajectory found for task {task_name} in {base_path}")
-        return None
-
     def _read_trajectories(self) -> tuple[list[ReplayCommand], list[dict], int]:
         """Read commands and messages from the previous trajectory."""
-        trajectory_folder = self._find_trajectory_folder()
+        trajectory_folder = find_trajectory_folder(self.logs_dir, self._base_folder)
         if trajectory_folder is None:
             return [], [], 0
         return self._parse_trajectory(trajectory_folder)
