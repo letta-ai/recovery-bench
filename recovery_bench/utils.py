@@ -215,6 +215,64 @@ def reorganize_directories(base_path: str) -> None:
     logger.info(f"Processed {len(task_to_hash)} tasks")
 
 
+def get_task_name(logs_dir: str | Path | None) -> str | None:
+    """Extract task name from a logs_dir path.
+
+    logs_dir is like: .../job-name/task-name__suffix/agent
+    Returns the task name with the ``__suffix`` stripped.
+    """
+    if not logs_dir:
+        return None
+    task_dir_name = Path(logs_dir).parent.name
+    if "__" in task_dir_name:
+        return task_dir_name.rsplit("__", 1)[0]
+    return task_dir_name
+
+
+def find_trajectory_folder(logs_dir: str | Path | None, base_folder: str | Path) -> Path | None:
+    """Find the trajectory folder for a task by matching task name against hash-prefixed dirs.
+
+    Args:
+        logs_dir: Agent logs directory (used to derive the task name).
+        base_folder: Root directory containing trajectory folders.
+
+    Returns:
+        Path to the matching trajectory folder, or None if not found.
+    """
+    task_name = get_task_name(logs_dir)
+    if not task_name:
+        logger.warning("Could not extract task name from logs_dir")
+        return None
+
+    base_path = Path(base_folder)
+    if not base_path.exists():
+        logger.warning(f"Trajectory folder not found: {base_path}")
+        return None
+
+    for item in base_path.iterdir():
+        if not item.is_dir():
+            continue
+        # Dir format: <hash>-<task-name>__<suffix>
+        dir_name = item.name
+        # Strip hash prefix (8 hex chars + dash)
+        if len(dir_name) > 9 and dir_name[8] == "-":
+            dir_task = dir_name[9:]
+        else:
+            dir_task = dir_name
+        # Strip __suffix
+        if "__" in dir_task:
+            dir_task = dir_task.rsplit("__", 1)[0]
+
+        if dir_task == task_name:
+            for traj_path in [item / "agent" / "trajectory.json", item / "trajectory.json"]:
+                if traj_path.exists():
+                    logger.debug(f"Found trajectory for task {task_name}: {item}")
+                    return item
+
+    logger.warning(f"No trajectory found for task {task_name} in {base_path}")
+    return None
+
+
 def get_agent_name(agent_import_path: str) -> str:
     """Get agent name from an import path like 'module.path:ClassName'.
 
