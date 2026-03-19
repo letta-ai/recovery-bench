@@ -28,8 +28,8 @@ __all__ = [
 AGENT_REGISTRY: dict[str, str] = {
     # Recovery agents (replay + modified instruction)
     "recovery-terminus": "recovery_bench.agents.terminus:RecoveryTerminus",
-    "recovery-terminus-no-messages": "recovery_bench.agents.terminus:RecoveryTerminusWithoutMessages",
-    "recovery-terminus-summaries": "recovery_bench.agents.terminus:RecoveryTerminusWithMessageSummaries",
+    "recovery-terminus-without-messages": "recovery_bench.agents.terminus:RecoveryTerminusWithoutMessages",
+    "recovery-terminus-with-summaries": "recovery_bench.agents.terminus:RecoveryTerminusWithMessageSummaries",
     "recovery-letta-code": "recovery_bench.agents.letta_code:RecoveryLettaCode",
     # Baseline agents (fresh start, no replay)
     "baseline-terminus": "recovery_bench.agents.terminus:BaselineTerminus",

@@ -34,29 +34,37 @@ logger = logging.getLogger(__name__)
 _RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
 
 
-def resolve_agent(agent_str: str) -> tuple[str, dict[str, str]]:
-    """Resolve an agent string to (import_path, extra_agent_kwargs).
+def resolve_agent(agent_str: str) -> tuple[str, bool, dict[str, str]]:
+    """Resolve an agent string to (agent_ref, is_import_path, extra_agent_kwargs).
 
-    Handles three formats:
-    1. Import path (contains ':'): pass through
+    Handles four formats:
+    1. Import path (contains ':'): pass through as --agent-import-path
     2. Registry name (in AGENT_REGISTRY): look up import path
     3. 'installed:<name>': route to RecoveryInstalledAgent with wrapped_agent kwarg
+    4. Plain Harbor agent name (e.g. 'terminus-2'): pass through as --agent
 
     Returns:
-        (import_path, extra_kwargs) where extra_kwargs are additional --agent-kwarg
-        flags to pass to harbor run.
+        (agent_ref, is_import_path, extra_kwargs)
+        - agent_ref: import path or harbor agent name
+        - is_import_path: True if agent_ref should be passed via --agent-import-path,
+          False if it should be passed via --agent
+        - extra_kwargs: additional --agent-kwarg flags to pass to harbor run
     """
     # Case 3: installed:<name>
     if agent_str.startswith("installed:"):
         harbor_agent_name = agent_str.split(":", 1)[1]
-        return _RECOVERY_INSTALLED_AGENT, {"wrapped_agent": harbor_agent_name}
+        return _RECOVERY_INSTALLED_AGENT, True, {"wrapped_agent": harbor_agent_name}
 
     # Case 2: registry name
     if agent_str in AGENT_REGISTRY:
-        return AGENT_REGISTRY[agent_str], {}
+        return AGENT_REGISTRY[agent_str], True, {}
 
-    # Case 1: import path (contains ':') or built-in harbor agent name
-    return agent_str, {}
+    # Case 1: import path (contains ':')
+    if ":" in agent_str:
+        return agent_str, True, {}
+
+    # Case 4: plain Harbor agent name (e.g. 'terminus-2')
+    return agent_str, False, {}
 
 
 def _append_agent_kwargs(
@@ -94,7 +102,7 @@ def generate_initial_traces(
         dataset_version: Terminal-Bench dataset version.
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to run. None = all tasks.
-        agent: Agent name or import path. None = terminus-2.
+        agent: Agent name, registry name, or import path. None = terminus-2.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
         letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
@@ -114,11 +122,14 @@ def generate_initial_traces(
         f"terminal-bench@{dataset_version}",
     ]
 
-    # Use custom agent or default to terminus-2
-    if agent and ":" in agent:
-        cmd.extend(["--agent-import-path", agent])
-    elif agent:
-        cmd.extend(["--agent", agent])
+    # Resolve agent name → import path or Harbor name
+    extra_kwargs: dict[str, str] = {}
+    if agent:
+        agent_ref, is_import_path, extra_kwargs = resolve_agent(agent)
+        if is_import_path:
+            cmd.extend(["--agent-import-path", agent_ref])
+        else:
+            cmd.extend(["--agent", agent_ref])
     else:
         cmd.extend(["--agent", "terminus-2"])
 
@@ -140,7 +151,12 @@ def generate_initial_traces(
         for task_id in task_ids:
             cmd.extend(["--task-name", task_id])
 
-    _append_agent_kwargs(cmd, model_kwargs=model_kwargs, letta_code_model=letta_code_model)
+    _append_agent_kwargs(
+        cmd,
+        model_kwargs=model_kwargs,
+        letta_code_model=letta_code_model,
+        extra_kwargs=extra_kwargs,
+    )
 
     result = run_command(cmd)
     if result.returncode != 0:
@@ -177,8 +193,8 @@ def generate_recovery_traces(
     Returns:
         Exit code from harbor run.
     """
-    # Resolve agent name → import path + extra kwargs
-    agent_import_path, extra_kwargs = resolve_agent(agent)
+    # Resolve agent name → ref + extra kwargs
+    agent_ref, is_import_path, extra_kwargs = resolve_agent(agent)
 
     env = os.environ.copy()
     env["TRAJECTORY_FOLDER"] = traces_folder
@@ -188,13 +204,21 @@ def generate_recovery_traces(
         "run",
         "--dataset",
         f"terminal-bench@{dataset_version}",
-        "--agent-import-path",
-        agent_import_path,
-        "--model",
-        model,
-        "--n-concurrent",
-        str(n_concurrent),
     ]
+
+    if is_import_path:
+        cmd.extend(["--agent-import-path", agent_ref])
+    else:
+        cmd.extend(["--agent", agent_ref])
+
+    cmd.extend(
+        [
+            "--model",
+            model,
+            "--n-concurrent",
+            str(n_concurrent),
+        ]
+    )
 
     if job_name:
         cmd.extend(["--job-name", job_name])
@@ -327,7 +351,7 @@ def run_pipeline(
         recovery_letta_code_model: Letta Code model id for recovery.
         resume_initial: Path to existing initial traces (skips generation).
         initial_agent: Agent name or import path for initial traces.
-        recovery_agent: Agent import path for recovery.
+        recovery_agent: Recovery agent name, import path, or installed:<name>.
         task_ids: Specific task IDs to run.
         n_concurrent: Number of concurrent processes.
         max_iterations: Maximum number of recovery iterations.
