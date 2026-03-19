@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import json
 import logging
@@ -7,12 +5,10 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import List
 
+from harbor.models.agent.context import AgentContext
 from litellm import ModelResponse, Usage, completion_cost
-
-if TYPE_CHECKING:
-    from harbor.models.agent.context import AgentContext
 from litellm.types.utils import (
     CompletionTokensDetailsWrapper,
     PromptTokensDetailsWrapper,
@@ -355,7 +351,7 @@ def calculate_cost(model_name: str, usage: dict) -> float:
 
 def save_usage(
     logs_dir: Path | None,
-    context: "AgentContext",
+    context: AgentContext,
     extra_fields: dict | None = None,
 ) -> None:
     """Save usage stats to a separate JSON file in the task dir.
