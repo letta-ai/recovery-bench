@@ -1,3 +1,9 @@
+"""LettaCode agent and its recovery variant for Harbor.
+
+- LettaCode: Runs Letta Code CLI inside a harbor environment (initial agent).
+- RecoveryLettaCode: Extends LettaCode with trajectory replay for recovery.
+"""
+
 import asyncio
 import json
 import logging
@@ -12,6 +18,11 @@ from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+from recovery_bench.replay import (
+    build_recovery_instruction,
+    find_and_parse_trajectory,
+    replay_via_exec,
+)
 from recovery_bench.utils import calculate_cost, save_usage
 
 logger = logging.getLogger(__name__)
@@ -177,7 +188,9 @@ class LettaCode(BaseInstalledAgent):
         the renamed copy (``letta_events_{ts}.jsonl``).
         """
         logs_dir = Path(self.logs_dir)
-        events_files = sorted(logs_dir.glob("*.events.jsonl")) + sorted(logs_dir.glob("letta_events_*.jsonl"))
+        events_files = sorted(logs_dir.glob("*.events.jsonl")) + sorted(
+            logs_dir.glob("letta_events_*.jsonl")
+        )
         if not events_files:
             return ""
         return events_files[0].read_text()
@@ -228,7 +241,9 @@ class LettaCode(BaseInstalledAgent):
 
         # Prefer Letta Code model id (bundles reasoning config) over raw handle.
         # self.model_name (litellm handle) is still used for cost calculation.
-        cli_model = self._letta_code_model or self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        cli_model = (
+            self._letta_code_model or self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        )
         if cli_model:
             agent_env["LETTA_MODEL"] = cli_model
 
@@ -376,3 +391,42 @@ class LettaCode(BaseInstalledAgent):
             (logs_dir / f"letta_agent_export_{ts}.af").write_bytes(agent_bytes)
         except Exception:
             pass
+
+
+class RecoveryLettaCode(LettaCode):
+    """LettaCode agent that replays a failed ATIF trajectory before running.
+
+    This agent:
+    1. Finds a previous failed trajectory by task name (from logs_dir)
+    2. Replays bash commands to restore the corrupted state
+    3. Runs LettaCode with a modified instruction indicating recovery
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._trajectory_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
+
+    @staticmethod
+    def name() -> str:
+        return "recovery-letta-code"
+
+    async def setup(self, environment: BaseEnvironment) -> None:
+        """Install LettaCode, then replay the failed trajectory."""
+        await super().setup(environment)
+
+        commands, _ = find_and_parse_trajectory(self.logs_dir, self._trajectory_folder)
+        if not commands:
+            logger.info("No operations found in trajectory, will run LettaCode fresh")
+            return
+
+        logger.info(f"Replaying {len(commands)} operations from previous trajectory...")
+        await replay_via_exec(environment, commands)
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """Prepend recovery prompt, then delegate to LettaCode."""
+        await super().run(build_recovery_instruction(instruction), environment, context)

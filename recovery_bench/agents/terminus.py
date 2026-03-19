@@ -1,5 +1,4 @@
-"""
-RecoveryTerminus - Extends Harbor's Terminus2 with trajectory replay for recovery.
+"""RecoveryTerminus - Extends Harbor's Terminus2 with trajectory replay for recovery.
 
 This agent reads previous failed trajectories, replays commands to restore
 the environment state during setup(), then runs Terminus2's agent loop
@@ -9,15 +8,13 @@ Variants:
 - RecoveryTerminus: Full message history recovery
 - RecoveryTerminusWithoutMessages: Environment-only recovery
 - RecoveryTerminusWithMessageSummaries: Summarized history recovery
+- BaselineTerminus: Fresh start (no replay) for comparison
 """
 
-import asyncio
 import json
 import logging
 import os
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.environments.base import BaseEnvironment
@@ -25,21 +22,18 @@ from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
+from recovery_bench.replay import (
+    extract_commands,
+    extract_messages,
+    replay_via_tmux,
+)
 from recovery_bench.utils import find_trajectory_folder, save_usage
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ReplayCommand:
-    """A command extracted from a previous trajectory for replay."""
-    keystrokes: str
-    timeout_sec: float = 15.0
-
-
 class RecoveryTerminus(Terminus2):
-    """
-    Terminus2 agent extended with trajectory replay for recovery.
+    """Terminus2 agent extended with trajectory replay for recovery.
 
     During setup(), reads a previous failed trajectory, replays all commands
     to restore the corrupted environment state. During run(), injects prior
@@ -65,10 +59,16 @@ class RecoveryTerminus(Terminus2):
         await super().setup(environment)
 
         # Read and replay trajectories during setup (not counted against agent timeout)
-        commands, messages, n_episodes = self._read_trajectories()
+        trajectory_folder = find_trajectory_folder(self.logs_dir, self._base_folder)
+        if trajectory_folder is None:
+            logger.info("No trajectory found, starting fresh")
+            return
+
+        commands = extract_commands(trajectory_folder)
+        messages = extract_messages(trajectory_folder)
 
         if commands:
-            self._last_replay_output = await self._replay_commands(commands)
+            self._last_replay_output = await replay_via_tmux(self._session, commands)
             logger.info(f"Replayed {len(commands)} commands from previous trajectory")
         else:
             logger.info("No commands found in trajectory, starting fresh")
@@ -128,20 +128,15 @@ class RecoveryTerminus(Terminus2):
             )
         finally:
             # Populate context with metrics (same as Terminus2.run())
-            context.rollout_details = (
-                self._chat.rollout_details + self._subagent_rollout_details
-            )
+            context.rollout_details = self._chat.rollout_details + self._subagent_rollout_details
             context.n_input_tokens = (
-                self._chat.total_input_tokens
-                + self._subagent_metrics.total_prompt_tokens
+                self._chat.total_input_tokens + self._subagent_metrics.total_prompt_tokens
             )
             context.n_output_tokens = (
-                self._chat.total_output_tokens
-                + self._subagent_metrics.total_completion_tokens
+                self._chat.total_output_tokens + self._subagent_metrics.total_completion_tokens
             )
             context.n_cache_tokens = (
-                self._chat.total_cache_tokens
-                + self._subagent_metrics.total_cached_tokens
+                self._chat.total_cache_tokens + self._subagent_metrics.total_cached_tokens
             )
             total_cost = self._chat.total_cost + self._subagent_metrics.total_cost_usd
             context.cost_usd = total_cost if total_cost > 0 else None
@@ -156,106 +151,12 @@ class RecoveryTerminus(Terminus2):
             self._dump_trajectory()
             save_usage(self.logs_dir, context)
 
-    # ===== Trajectory replay helpers =====
-
-    def _read_trajectories(self) -> tuple[list[ReplayCommand], list[dict], int]:
-        """Read commands and messages from the previous trajectory."""
-        trajectory_folder = find_trajectory_folder(self.logs_dir, self._base_folder)
-        if trajectory_folder is None:
-            return [], [], 0
-        return self._parse_trajectory(trajectory_folder)
-
-    def _parse_trajectory(
-        self, trajectory_folder: Path
-    ) -> tuple[list[ReplayCommand], list[dict], int]:
-        """Parse commands and messages from a trajectory folder."""
-        trajectory_file = trajectory_folder / "agent" / "trajectory.json"
-        if not trajectory_file.exists():
-            trajectory_file = trajectory_folder / "trajectory.json"
-        if not trajectory_file.exists():
-            return [], [], 0
-
-        try:
-            with open(trajectory_file, "r") as f:
-                trajectory = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return [], [], 0
-
-        commands: list[ReplayCommand] = []
-        messages: list[dict] = []
-        n_episodes = 0
-
-        steps = trajectory.get("steps", trajectory)
-
-        for step in steps:
-            source = step.get("source", step.get("role", ""))
-            content = step.get("message", step.get("content", ""))
-
-            if source in ("agent", "assistant"):
-                n_episodes += 1
-                # Extract commands from tool_calls (ATIF v1.5)
-                tool_calls = step.get("tool_calls", [])
-                for tool_call in tool_calls:
-                    args = tool_call.get("arguments", {})
-                    keystrokes = args.get("keystrokes", "")
-                    if keystrokes:
-                        commands.append(ReplayCommand(
-                            keystrokes=keystrokes,
-                            timeout_sec=int(args.get("duration", 1) * 10) + 5,
-                        ))
-
-                # Fallback: parse commands from message content (old format)
-                if not tool_calls:
-                    try:
-                        response = json.loads(content) if isinstance(content, str) else content
-                        if isinstance(response, dict) and "commands" in response:
-                            for cmd in response["commands"]:
-                                commands.append(ReplayCommand(
-                                    keystrokes=cmd.get("keystrokes", ""),
-                                    timeout_sec=cmd.get("timeout_sec", 120),
-                                ))
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-
-            # Collect messages for context injection
-            role = "assistant" if source == "agent" else source
-            if role in ("user", "assistant", "system"):
-                messages.append({"role": role, "content": content})
-
-        return commands, messages, n_episodes
-
-    async def _replay_commands(self, commands: list[ReplayCommand]) -> str:
-        """Replay commands in the environment to restore state."""
-        if not self._session:
-            logger.warning("TmuxSession not initialized, cannot replay")
-            return ""
-
-        for command in commands:
-            try:
-                await self._session.send_keys(
-                    keys=command.keystrokes,
-                    min_timeout_sec=0.5,
-                    max_timeout_sec=float(command.timeout_sec),
-                )
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Replay error: {e}")
-                continue
-
-        try:
-            last_output = await self._session.capture_pane()
-            return last_output or ""
-        except Exception:
-            return ""
-
 
 class BaselineTerminus(Terminus2):
-    """
-    Baseline agent: runs Terminus2 fresh on the task with no replay.
+    """Baseline agent: runs Terminus2 fresh on the task with no replay.
 
     Used to compare "strong model from scratch" vs "strong model with recovery".
-    Accepts model_kwargs so it works with the same run_recovery.py pipeline.
+    Accepts model_kwargs so it works with the same pipeline.
     """
 
     def __init__(self, model_kwargs: dict = None, **kwargs):
@@ -277,9 +178,7 @@ class BaselineTerminus(Terminus2):
 
 
 class RecoveryTerminusWithoutMessages(RecoveryTerminus):
-    """
-    Recovery agent that only restores environment state (no message history).
-    """
+    """Recovery agent that only restores environment state (no message history)."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -291,8 +190,7 @@ class RecoveryTerminusWithoutMessages(RecoveryTerminus):
 
 
 class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
-    """
-    Recovery agent that injects a summarized version of the previous
+    """Recovery agent that injects a summarized version of the previous
     conversation history instead of the full messages.
     """
 

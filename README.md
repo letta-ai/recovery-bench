@@ -71,7 +71,7 @@ Options:
 - `--initial-model`: Model name or JSON config for initial traces (required unless `--resume-initial`)
 - `--recovery-model`: Model name or JSON config for recovery (required for recovery, skips recovery if omitted)
 - `--task-id`: Specific task ID(s) to run (can be repeated)
-- `--recovery-agent`: Recovery agent import path
+- `--recovery-agent`: Recovery agent name, import path, or `installed:<name>` (default: `recovery-terminus`)
 - `--initial-agent`: Initial agent import path (default: `terminus-2`)
 - `--n-concurrent`: Number of concurrent processes (default: 8)
 - `--max-iterations`: Maximum recovery iterations (default: 1)
@@ -83,49 +83,64 @@ Options:
 
 ## Agents
 
+### Evaluating new models (no code)
+
+Use `RecoveryTerminus` (default) with different models:
+
+```bash
+python -m recovery_bench.generate_traces \
+    --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
+```
+
+### Evaluating any Harbor installed agent (no code)
+
+Wrap any Harbor installed agent with `installed:<name>`:
+
+```bash
+# Claude Code as recovery agent
+python -m recovery_bench.generate_traces \
+    --recovery-agent installed:claude-code \
+    --recovery-model anthropic/claude-sonnet-4-6 \
+    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
+
+# Codex as recovery agent
+python -m recovery_bench.generate_traces \
+    --recovery-agent installed:codex \
+    --recovery-model openai/gpt-5.3-codex \
+    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
+
+# Any Harbor agent: aider, gemini-cli, goose, openhands, etc.
+python -m recovery_bench.generate_traces \
+    --recovery-agent installed:gemini-cli \
+    --recovery-model google/gemini-3.1-pro \
+    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
+```
+
 ### Terminus-2 (ATIF format)
 
 Recovery agents extend Harbor's [Terminus-2](https://github.com/laude-institute/harbor/blob/main/src/harbor/agents/terminus_2/terminus_2.py), inheriting its LLM calling (with retry and exponential backoff), context summarization, response parsing, and ATIF trajectory format.
 
 ```bash
-# Initial
---initial-agent terminus-2
+# Recovery (default)
+--recovery-agent recovery-terminus
 
-# Recovery
---recovery-agent recovery_bench.recovery_terminus:RecoveryTerminus
-```
+# Variants
+--recovery-agent recovery-terminus-no-messages   # Environment replay only
+--recovery-agent recovery-terminus-summaries      # Summarized history
 
-Recovery variants:
-- `RecoveryTerminus`: Full message history from failed attempt injected into context
-- `RecoveryTerminusWithoutMessages`: Environment replay only, no prior messages
-- `RecoveryTerminusWithMessageSummaries`: LLM-generated summary of prior messages
-
-Baseline (no replay, fresh start on the same failed tasks):
-- `BaselineTerminus`: Runs Terminus2 from scratch for comparison
-
-```bash
-# Recovery run
-python -m recovery_bench.generate_traces \
-    --recovery-model configs/models/sonnet-46-max.json \
-    --resume-initial jobs/initial-haiku-xxx
-
-# Baseline run (fresh start, no replay)
-python -m recovery_bench.generate_traces \
-    --recovery-model configs/models/sonnet-46-max.json \
-    --resume-initial jobs/initial-haiku-xxx \
-    --recovery-agent recovery_bench.recovery_terminus:BaselineTerminus
+# Baseline (fresh start, no replay)
+--recovery-agent baseline-terminus
 ```
 
 ### LettaCode (events JSONL format)
 
-For LettaCode agents that output `letta_events_*.jsonl`:
-
 ```bash
 # Initial
---initial-agent recovery_bench.letta_code_agent:LettaCode
+--initial-agent recovery_bench.agents.letta_code:LettaCode
 
 # Recovery
---recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode
+--recovery-agent recovery-letta-code
 ```
 
 ## Example
@@ -135,8 +150,8 @@ Test haiku failing, opus recovering:
 ```bash
 python -m recovery_bench.generate_traces \
     --initial-model anthropic/claude-haiku-4-5-20251001 \
-    --initial-agent recovery_bench.letta_code_agent:LettaCode \
-    --recovery-agent recovery_bench.recovery_letta_code:RecoveryLettaCode \
+    --initial-agent recovery_bench.agents.letta_code:LettaCode \
+    --recovery-agent recovery-letta-code \
     --recovery-model anthropic/claude-opus-4-5-20251101 \
     --task-id sqlite-db-truncate \
     --max-iterations 1

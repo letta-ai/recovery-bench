@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
+from .agents import AGENT_REGISTRY
 from .utils import (
     aggregate_usage,
     cleanup_docker,
@@ -29,17 +30,49 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+# Import path for the generic recovery wrapper
+_RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
+
+
+def resolve_agent(agent_str: str) -> tuple[str, dict[str, str]]:
+    """Resolve an agent string to (import_path, extra_agent_kwargs).
+
+    Handles three formats:
+    1. Import path (contains ':'): pass through
+    2. Registry name (in AGENT_REGISTRY): look up import path
+    3. 'installed:<name>': route to RecoveryInstalledAgent with wrapped_agent kwarg
+
+    Returns:
+        (import_path, extra_kwargs) where extra_kwargs are additional --agent-kwarg
+        flags to pass to harbor run.
+    """
+    # Case 3: installed:<name>
+    if agent_str.startswith("installed:"):
+        harbor_agent_name = agent_str.split(":", 1)[1]
+        return _RECOVERY_INSTALLED_AGENT, {"wrapped_agent": harbor_agent_name}
+
+    # Case 2: registry name
+    if agent_str in AGENT_REGISTRY:
+        return AGENT_REGISTRY[agent_str], {}
+
+    # Case 1: import path (contains ':') or built-in harbor agent name
+    return agent_str, {}
+
 
 def _append_agent_kwargs(
     cmd: list[str],
     model_kwargs: dict | None = None,
     letta_code_model: str | None = None,
+    extra_kwargs: dict[str, str] | None = None,
 ) -> None:
     """Append ``--agent-kwarg`` flags to a harbor command."""
     if model_kwargs:
         cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
     if letta_code_model:
         cmd.extend(["--agent-kwarg", f"letta_code_model={letta_code_model}"])
+    if extra_kwargs:
+        for key, value in extra_kwargs.items():
+            cmd.extend(["--agent-kwarg", f"{key}={value}"])
 
 
 def generate_initial_traces(
@@ -89,14 +122,16 @@ def generate_initial_traces(
     else:
         cmd.extend(["--agent", "terminus-2"])
 
-    cmd.extend([
-        "--model",
-        model,
-        "--job-name",
-        job_name,
-        "--n-concurrent",
-        str(n_concurrent),
-    ])
+    cmd.extend(
+        [
+            "--model",
+            model,
+            "--job-name",
+            job_name,
+            "--n-concurrent",
+            str(n_concurrent),
+        ]
+    )
 
     if harbor_env:
         cmd.extend(["--env", harbor_env])
@@ -118,7 +153,7 @@ def generate_recovery_traces(
     model: str,
     task_ids: List[str],
     job_name: str | None = None,
-    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
+    agent: str = "recovery-terminus",
     n_concurrent: int = 4,
     model_kwargs: dict | None = None,
     letta_code_model: str | None = None,
@@ -132,7 +167,7 @@ def generate_recovery_traces(
         model: Model name for the recovery agent.
         task_ids: Task IDs to run recovery on.
         job_name: Job name for output directory.
-        agent: Recovery agent import path.
+        agent: Recovery agent name, import path, or installed:<name>.
         n_concurrent: Number of concurrent processes.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
         letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
@@ -142,16 +177,23 @@ def generate_recovery_traces(
     Returns:
         Exit code from harbor run.
     """
+    # Resolve agent name → import path + extra kwargs
+    agent_import_path, extra_kwargs = resolve_agent(agent)
+
     env = os.environ.copy()
     env["TRAJECTORY_FOLDER"] = traces_folder
 
     cmd = [
         "harbor",
         "run",
-        "--dataset", f"terminal-bench@{dataset_version}",
-        "--agent-import-path", agent,
-        "--model", model,
-        "--n-concurrent", str(n_concurrent),
+        "--dataset",
+        f"terminal-bench@{dataset_version}",
+        "--agent-import-path",
+        agent_import_path,
+        "--model",
+        model,
+        "--n-concurrent",
+        str(n_concurrent),
     ]
 
     if job_name:
@@ -160,7 +202,12 @@ def generate_recovery_traces(
     if harbor_env:
         cmd.extend(["--env", harbor_env])
 
-    _append_agent_kwargs(cmd, model_kwargs=model_kwargs, letta_code_model=letta_code_model)
+    _append_agent_kwargs(
+        cmd,
+        model_kwargs=model_kwargs,
+        letta_code_model=letta_code_model,
+        extra_kwargs=extra_kwargs,
+    )
 
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
@@ -181,7 +228,7 @@ def run_recovery(
     traces_folder: str,
     model: str,
     job_name: str,
-    agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
+    agent: str = "recovery-terminus",
     n_concurrent: int = 4,
     task_ids: List[str] | None = None,
     model_kwargs: dict | None = None,
@@ -196,7 +243,7 @@ def run_recovery(
         traces_folder: Path to initial traces directory.
         model: Model name for the recovery agent.
         job_name: Job name for output directory.
-        agent: Recovery agent import path.
+        agent: Recovery agent name, import path, or installed:<name>.
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
         model_kwargs: Extra model kwargs (e.g. reasoning effort).
@@ -257,7 +304,7 @@ def run_pipeline(
     recovery_letta_code_model: str | None = None,
     resume_initial: str | None = None,
     initial_agent: str | None = None,
-    recovery_agent: str = "recovery_bench.recovery_terminus:RecoveryTerminus",
+    recovery_agent: str = "recovery-terminus",
     task_ids: List[str] | None = None,
     n_concurrent: int = 8,
     max_iterations: int = 1,

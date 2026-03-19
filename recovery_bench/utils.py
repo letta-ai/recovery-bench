@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -5,9 +7,12 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from litellm import ModelResponse, Usage, completion_cost
+
+if TYPE_CHECKING:
+    from harbor.models.agent.context import AgentContext
 from litellm.types.utils import (
     CompletionTokensDetailsWrapper,
     PromptTokensDetailsWrapper,
@@ -66,9 +71,7 @@ def cleanup_docker():
 
     # Clean up Docker system
     try:
-        result = subprocess.run(
-            ["docker", "system", "prune", "-f"], capture_output=True, text=True
-        )
+        result = subprocess.run(["docker", "system", "prune", "-f"], capture_output=True, text=True)
         if result.returncode == 0:
             logger.info("Successfully cleaned up Docker system")
         else:
@@ -90,7 +93,7 @@ def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
         results_file = task_dir / "result.json"
         if not results_file.exists():
             continue
-            
+
         try:
             with open(results_file, "r") as f:
                 results = json.load(f)
@@ -105,7 +108,7 @@ def get_unsolved_tasks(logs_dir: str, print_output: bool = False) -> List[str]:
             if print_output:
                 logger.debug(f"Skipping {task_id}: resolved (reward={reward})")
             continue
-        
+
         task_name = results.get("task_name", task_id)
         unsolved_ids.append(task_name)
 
@@ -187,9 +190,9 @@ def reorganize_directories(base_path: str) -> None:
     for task_dir in base_path.iterdir():
         if not task_dir.is_dir():
             continue
-        
+
         task_name = task_dir.name
-        
+
         if is_hash_prefixed_directory(task_name):
             logger.debug(f"  {task_name} -> SKIPPED (already has hash prefix)")
             continue

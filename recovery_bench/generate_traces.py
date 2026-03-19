@@ -89,8 +89,12 @@ def main():
     parser.add_argument(
         "--recovery-agent",
         type=str,
-        default="recovery_bench.recovery_terminus:RecoveryTerminus",
-        help="Agent import path for recovery",
+        default="recovery-terminus",
+        help=(
+            "Recovery agent: registry name (e.g. recovery-terminus), "
+            "import path (e.g. module:Class), or installed:<name> "
+            "(e.g. installed:claude-code) to wrap a Harbor agent"
+        ),
     )
     parser.add_argument(
         "--job-name",
@@ -118,8 +122,12 @@ def main():
         parser.error("--recovery-model is required when using --resume-initial")
 
     # Resolve model configs
-    initial_model, initial_model_kwargs, initial_lc_model = resolve_model(args.initial_model) if args.initial_model else (None, {}, None)
-    recovery_model, recovery_model_kwargs, recovery_lc_model = resolve_model(args.recovery_model) if args.recovery_model else (None, {}, None)
+    initial_model, initial_model_kwargs, initial_lc_model = (
+        resolve_model(args.initial_model) if args.initial_model else (None, {}, None)
+    )
+    recovery_model, recovery_model_kwargs, recovery_lc_model = (
+        resolve_model(args.recovery_model) if args.recovery_model else (None, {}, None)
+    )
 
     return run_pipeline(
         initial_model=initial_model,
