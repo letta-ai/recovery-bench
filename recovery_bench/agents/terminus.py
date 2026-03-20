@@ -22,6 +22,12 @@ from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
+from recovery_bench.prompts import (
+    SUMMARIZE_MESSAGES_PROMPT,
+    SUMMARY_FALLBACK,
+    SUMMARY_MESSAGE_TEMPLATE,
+    build_recovery_instruction,
+)
 from recovery_bench.replay import (
     extract_commands,
     extract_messages,
@@ -97,15 +103,8 @@ class RecoveryTerminus(Terminus2):
         # Build recovery prompt using terminus2's template format
         terminal_state = self._limit_output_length(self._last_replay_output)
 
-        recovery_instruction = (
-            f"{instruction}\n\n"
-            "RECOVERY MODE: Previous attempt(s) to complete this task failed. "
-            "The environment has been restored to the state after the failed attempt. "
-            "Please analyze what went wrong and try a DIFFERENT approach."
-        )
-
         initial_prompt = self._prompt_template.format(
-            instruction=recovery_instruction,
+            instruction=build_recovery_instruction(instruction),
             terminal_state=terminal_state,
         )
 
@@ -212,19 +211,15 @@ class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
         if self._replay_messages:
             summary = await self._summarize_messages(self._replay_messages)
             self._replay_messages = [
-                {"role": "assistant", "content": f"Summary of previous attempts:\n{summary}"}
+                {"role": "assistant", "content": SUMMARY_MESSAGE_TEMPLATE.format(summary=summary)}
             ]
         await super().run(instruction, environment, context)
 
     async def _summarize_messages(self, messages: list[dict]) -> str:
         """Use the LLM to summarize previous conversation messages."""
-        prompt = (
-            "Please summarize the following conversation concisely, "
-            "focusing on what was attempted and what went wrong:\n\n"
-            + json.dumps(messages, indent=2)
-        )
+        prompt = SUMMARIZE_MESSAGES_PROMPT + json.dumps(messages, indent=2)
         try:
             response = await self._llm.call(prompt=prompt, message_history=[])
             return response.content
         except Exception:
-            return "Previous attempts to complete this task failed."
+            return SUMMARY_FALLBACK

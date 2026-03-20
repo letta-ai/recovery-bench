@@ -5,7 +5,6 @@ Provides the common recovery logic used by all recovery agents:
 - Command extraction (shell commands + raw keystrokes)
 - Replay executors (environment.exec for installed agents, tmux for terminus)
 - Chat message extraction (for context injection)
-- Recovery instruction wrapping
 """
 
 import asyncio
@@ -225,17 +224,3 @@ async def replay_via_tmux(
         return ""
 
 
-# ---------------------------------------------------------------------------
-# Recovery instruction
-# ---------------------------------------------------------------------------
-
-
-def build_recovery_instruction(instruction: str) -> str:
-    """Wrap instruction with recovery context."""
-    return (
-        "RECOVERY MODE: The previous attempt to complete this task failed. "
-        "The environment has been restored to the state after the failed attempt. "
-        "Please analyze what went wrong and try a DIFFERENT approach.\n\n"
-        "--- ORIGINAL TASK ---\n"
-        f"{instruction}"
-    )

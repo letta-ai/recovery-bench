@@ -12,8 +12,8 @@ import os
 from harbor.agents.factory import AgentFactory
 from harbor.models.agent.name import AgentName
 
+from recovery_bench.prompts import build_recovery_instruction
 from recovery_bench.replay import (
-    build_recovery_instruction,
     find_and_parse_trajectory,
     replay_via_exec,
 )

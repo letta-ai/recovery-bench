@@ -18,8 +18,8 @@ from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+from recovery_bench.prompts import LETTA_CODE_PROMPT_PREFIX, build_recovery_instruction
 from recovery_bench.replay import (
-    build_recovery_instruction,
     find_and_parse_trajectory,
     replay_via_exec,
 )
@@ -248,12 +248,7 @@ class LettaCode(BaseInstalledAgent):
             agent_env["LETTA_MODEL"] = cli_model
 
         # --- build full instruction with prompt prefix ----------------------
-        prompt_prefix = (
-            "Complete the task. Do NOT ask clarification questions, you have "
-            "enough information to complete the task. Make sure to finish the "
-            "task to the best of your ability and do not stop at an intermediate step."
-        )
-        full_instruction = f"{prompt_prefix}\n\n{instruction}"
+        full_instruction = f"{LETTA_CODE_PROMPT_PREFIX}\n\n{instruction}"
 
         # --- upload instruction -------------------------------------------
         escaped_instruction = shlex.quote(full_instruction)
