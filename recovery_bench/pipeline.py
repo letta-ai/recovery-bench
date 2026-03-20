@@ -6,7 +6,7 @@ Functions are ordered low-level → high-level:
 - generate_initial_traces: Run harbor for initial traces
 - generate_recovery_traces: Run harbor for recovery traces
 - run_recovery: Single recovery pass (reorganize → unsolved → recover → aggregate)
-- run_pipeline: Full orchestrator (initial → reorganize → iterative recovery)
+- run_pipeline: Full orchestrator (initial → reorganize → recovery)
 """
 
 import json
@@ -306,7 +306,6 @@ def run_pipeline(
     recovery_agent: str = "recovery-terminus",
     task_ids: list[str] | None = None,
     n_concurrent: int = 8,
-    max_iterations: int = 1,
     dataset_version: str = "2.0",
     job_name: str | None = None,
     cleanup_container: bool = False,
@@ -315,8 +314,8 @@ def run_pipeline(
 ) -> int:
     """Run the full trace generation pipeline.
 
-    Generates initial traces (or resumes from existing), then iteratively
-    runs recovery on unsolved tasks.
+    Generates initial traces (or resumes from existing), then runs
+    recovery on unsolved tasks.
 
     Args:
         initial_model: Model name for initial traces. Required unless resume_initial is set.
@@ -330,7 +329,6 @@ def run_pipeline(
         recovery_agent: Recovery agent name, import path, or installed:<name>.
         task_ids: Specific task IDs to run.
         n_concurrent: Number of concurrent processes.
-        max_iterations: Maximum number of recovery iterations.
         dataset_version: Terminal-Bench dataset version.
         job_name: Custom job name for recovery output.
         cleanup_container: Whether to cleanup Docker before running.
@@ -388,56 +386,34 @@ def run_pipeline(
     # Step 2: Reorganize initial traces with hash prefixes
     reorganize_directories(initial_traces_dir)
 
-    # Step 3: Iteratively run recovery on unsolved tasks
-    all_trace_dirs = [initial_traces_dir]
-    current_traces_dir = initial_traces_dir
+    # Step 3: Run recovery on unsolved tasks
+    recovery_agent_name = get_agent_name(recovery_agent)
+    recovery_model_short = shorten_model_name(recovery_model)
+    recovery_job_name = (
+        job_name or f"{recovery_agent_name}-{message_mode}-{recovery_model_short}-{timestamp}"
+    )
 
-    for iteration in range(1, max_iterations + 1):
-        logger.info(f"--- Starting iteration {iteration} ---")
+    recovery_traces_dir, rc = run_recovery(
+        traces_folder=initial_traces_dir,
+        model=recovery_model,
+        job_name=recovery_job_name,
+        agent=recovery_agent,
+        n_concurrent=n_concurrent,
+        task_ids=task_ids if resume_initial else None,
+        model_kwargs=recovery_model_kwargs,
+        letta_code_model=recovery_letta_code_model,
+        harbor_env=harbor_env,
+        dataset_version=dataset_version,
+        reorganize=False,  # Already reorganized above
+        message_mode=message_mode,
+    )
 
-        # Build job name
-        if job_name and max_iterations == 1:
-            recovery_job_name = job_name
-        else:
-            recovery_agent_name = get_agent_name(recovery_agent)
-            recovery_model_short = shorten_model_name(recovery_model)
-            recovery_job_name = (
-                job_name
-                or f"{recovery_agent_name}-{message_mode}-{recovery_model_short}-{timestamp}"
-            )
-            if max_iterations > 1:
-                recovery_job_name = f"{recovery_job_name}-iter{iteration}"
-
-        recovery_traces_dir, rc = run_recovery(
-            traces_folder=current_traces_dir,
-            model=recovery_model,
-            job_name=recovery_job_name,
-            agent=recovery_agent,
-            n_concurrent=n_concurrent,
-            task_ids=task_ids if resume_initial else None,
-            model_kwargs=recovery_model_kwargs,
-            letta_code_model=recovery_letta_code_model,
-            harbor_env=harbor_env,
-            dataset_version=dataset_version,
-            reorganize=False,  # Already reorganized above (or by previous iteration)
-            message_mode=message_mode,
-        )
-
-        if rc != 0:
-            logger.error(f"Recovery iteration {iteration} failed with exit code {rc}")
-            return rc
-
-        if not recovery_traces_dir:
-            logger.info(f"No unsolved tasks found in iteration {iteration}, stopping.")
-            break
-
-        # Hash reorganize the new traces for next iteration
-        reorganize_directories(recovery_traces_dir)
-
-        all_trace_dirs.append(recovery_traces_dir)
-        current_traces_dir = recovery_traces_dir
+    if rc != 0:
+        logger.error(f"Recovery failed with exit code {rc}")
+        return rc
 
     logger.info("--- Pipeline completed successfully! ---")
     logger.info(f"Initial traces: {initial_traces_dir}")
-    logger.info(f"All trace directories: {all_trace_dirs}")
+    if recovery_traces_dir:
+        logger.info(f"Recovery traces: {recovery_traces_dir}")
     return 0

@@ -50,12 +50,6 @@ def main():
         "--n-concurrent", type=int, default=8, help="Number of concurrent processes"
     )
     parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=1,
-        help="Maximum number of recovery iterations",
-    )
-    parser.add_argument(
         "--cleanup-container",
         action="store_true",
         default=False,
@@ -148,7 +142,6 @@ def main():
         recovery_agent=args.recovery_agent,
         task_ids=args.task_ids,
         n_concurrent=args.n_concurrent,
-        max_iterations=args.max_iterations,
         dataset_version=args.dataset_version,
         job_name=args.job_name,
         cleanup_container=args.cleanup_container,
