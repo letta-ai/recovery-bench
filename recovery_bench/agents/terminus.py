@@ -34,8 +34,6 @@ from recovery_bench.utils import find_trajectory_folder, save_usage
 
 logger = logging.getLogger(__name__)
 
-_VALID_MESSAGE_MODES = ("full", "none", "summary")
-
 
 class RecoveryTerminus(Terminus2):
     """Terminus2 agent extended with trajectory replay for recovery.
@@ -55,10 +53,6 @@ class RecoveryTerminus(Terminus2):
     def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
         super().__init__(**(model_kwargs or {}), **kwargs)
 
-        if message_mode not in _VALID_MESSAGE_MODES:
-            raise ValueError(
-                f"Invalid message_mode={message_mode!r}. Must be one of {_VALID_MESSAGE_MODES}"
-            )
         self._message_mode = message_mode
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
         self._last_replay_output = ""
