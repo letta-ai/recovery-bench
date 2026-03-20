@@ -18,7 +18,11 @@ from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from recovery_bench.prompts import LETTA_CODE_PROMPT_PREFIX, build_recovery_instruction
+from recovery_bench.prompts import (
+    LETTA_CODE_PROMPT_PREFIX,
+    build_message_context,
+    build_recovery_instruction,
+)
 from recovery_bench.replay import (
     find_and_parse_trajectory,
     replay_via_exec,
@@ -395,11 +399,18 @@ class RecoveryLettaCode(LettaCode):
     1. Finds a previous failed trajectory by task name (from logs_dir)
     2. Replays bash commands to restore the corrupted state
     3. Runs LettaCode with a modified instruction indicating recovery
+
+    Args:
+        message_mode: How to use messages from the previous trajectory.
+            ``"full"`` includes the full transcript, ``"none"`` skips them,
+            ``"summary"`` summarizes via LLM first.  Default: ``"full"``.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, message_mode: str = "full", **kwargs):
         super().__init__(*args, **kwargs)
         self._trajectory_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
+        self._message_mode = message_mode
+        self._replay_messages: list[dict] = []
 
     @staticmethod
     def name() -> str:
@@ -409,7 +420,9 @@ class RecoveryLettaCode(LettaCode):
         """Install LettaCode, then replay the failed trajectory."""
         await super().setup(environment)
 
-        commands, _ = find_and_parse_trajectory(self.logs_dir, self._trajectory_folder)
+        commands, messages = find_and_parse_trajectory(self.logs_dir, self._trajectory_folder)
+        self._replay_messages = messages
+
         if not commands:
             logger.info("No operations found in trajectory, will run LettaCode fresh")
             return
@@ -424,4 +437,9 @@ class RecoveryLettaCode(LettaCode):
         context: AgentContext,
     ) -> None:
         """Prepend recovery prompt, then delegate to LettaCode."""
-        await super().run(build_recovery_instruction(instruction), environment, context)
+        model = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        message_context = await build_message_context(
+            self._replay_messages, self._message_mode, model
+        )
+        recovery_instruction = build_recovery_instruction(instruction, message_context)
+        await super().run(recovery_instruction, environment, context)

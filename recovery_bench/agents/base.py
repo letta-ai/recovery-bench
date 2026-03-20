@@ -12,7 +12,10 @@ import os
 from harbor.agents.factory import AgentFactory
 from harbor.models.agent.name import AgentName
 
-from recovery_bench.prompts import build_recovery_instruction
+from recovery_bench.prompts import (
+    build_message_context,
+    build_recovery_instruction,
+)
 from recovery_bench.replay import (
     find_and_parse_trajectory,
     replay_via_exec,
@@ -74,7 +77,7 @@ class RecoveryInstalledAgent:
                    --agent-kwarg wrapped_agent=claude-code
     """
 
-    def __new__(cls, wrapped_agent: str, **kwargs):
+    def __new__(cls, wrapped_agent: str, message_mode: str = "full", **kwargs):
         inner_cls = resolve_harbor_agent(wrapped_agent)
 
         if inner_cls not in _recovery_class_cache:
@@ -82,20 +85,32 @@ class RecoveryInstalledAgent:
             class Recovery(inner_cls):
                 _trajectory_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
 
+                def __init__(self, _message_mode: str = "full", **kw):
+                    super().__init__(**kw)
+                    self._message_mode = _message_mode
+                    self._replay_messages: list[dict] = []
+
                 @staticmethod
                 def name() -> str:
                     return f"recovery-{inner_cls.name()}"
 
                 async def setup(self, environment):
                     await super().setup(environment)
-                    commands, _ = find_and_parse_trajectory(self.logs_dir, self._trajectory_folder)
+                    commands, messages = find_and_parse_trajectory(
+                        self.logs_dir, self._trajectory_folder
+                    )
+                    self._replay_messages = messages
                     if commands:
                         await replay_via_exec(environment, commands)
                         logger.info(f"Replayed {len(commands)} commands from previous trajectory")
 
                 async def run(self, instruction, environment, context):
+                    model = getattr(self, "model_name", "") or ""
+                    message_context = await build_message_context(
+                        self._replay_messages, self._message_mode, model
+                    )
                     await super().run(
-                        build_recovery_instruction(instruction),
+                        build_recovery_instruction(instruction, message_context),
                         environment,
                         context,
                     )
@@ -106,4 +121,4 @@ class RecoveryInstalledAgent:
             Recovery.__qualname__ = f"Recovery{inner_cls.__name__}"
             _recovery_class_cache[inner_cls] = Recovery
 
-        return _recovery_class_cache[inner_cls](**kwargs)
+        return _recovery_class_cache[inner_cls](_message_mode=message_mode, **kwargs)

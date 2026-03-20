@@ -108,6 +108,13 @@ def main():
         default=None,
         help="Harbor sandbox backend (e.g., docker, daytona, modal)",
     )
+    parser.add_argument(
+        "--message-mode",
+        type=str,
+        choices=["full", "none", "summary"],
+        default="full",
+        help="How recovery agents use messages from previous trajectory (default: full)",
+    )
 
     args = parser.parse_args()
 
@@ -146,6 +153,7 @@ def main():
         job_name=args.job_name,
         cleanup_container=args.cleanup_container,
         harbor_env=args.env,
+        message_mode=args.message_mode,
     )
 
 

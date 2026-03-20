@@ -75,6 +75,7 @@ def _build_harbor_cmd(
     model_kwargs: dict | None = None,
     letta_code_model: str | None = None,
     harbor_env: str | None = None,
+    message_mode: str | None = None,
 ) -> list[str]:
     """Build the ``harbor run`` command list.
 
@@ -109,6 +110,8 @@ def _build_harbor_cmd(
         cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
     if letta_code_model:
         cmd.extend(["--agent-kwarg", f"letta_code_model={letta_code_model}"])
+    if message_mode:
+        cmd.extend(["--agent-kwarg", f"message_mode={message_mode}"])
     if extra_kwargs:
         for key, value in extra_kwargs.items():
             cmd.extend(["--agent-kwarg", f"{key}={value}"])
@@ -177,6 +180,7 @@ def generate_recovery_traces(
     letta_code_model: str | None = None,
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
+    message_mode: str | None = None,
 ) -> int:
     """Run recovery agent on initial traces using harbor.
 
@@ -191,6 +195,7 @@ def generate_recovery_traces(
         letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
+        message_mode: Message mode for recovery agent (full/none/summary).
 
     Returns:
         Exit code from harbor run.
@@ -208,6 +213,7 @@ def generate_recovery_traces(
         model_kwargs=model_kwargs,
         letta_code_model=letta_code_model,
         harbor_env=harbor_env,
+        message_mode=message_mode,
     )
 
     result = run_command(cmd, env=env)
@@ -226,6 +232,7 @@ def run_recovery(
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
     reorganize: bool = True,
+    message_mode: str | None = None,
 ) -> tuple[str, int]:
     """Run a single recovery pass: reorganize → find unsolved → recover → aggregate.
 
@@ -241,6 +248,7 @@ def run_recovery(
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
         reorganize: Whether to reorganize directories with hash prefixes first.
+        message_mode: Message mode for recovery agent (full/none/summary).
 
     Returns:
         (output_job_dir, exit_code). output_job_dir is "" if no tasks to recover.
@@ -268,6 +276,7 @@ def run_recovery(
         letta_code_model=letta_code_model,
         harbor_env=harbor_env,
         dataset_version=dataset_version,
+        message_mode=message_mode,
     )
 
     # Aggregate usage
@@ -302,6 +311,7 @@ def run_pipeline(
     job_name: str | None = None,
     cleanup_container: bool = False,
     harbor_env: str | None = None,
+    message_mode: str | None = None,
 ) -> int:
     """Run the full trace generation pipeline.
 
@@ -325,6 +335,7 @@ def run_pipeline(
         job_name: Custom job name for recovery output.
         cleanup_container: Whether to cleanup Docker before running.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
+        message_mode: Message mode for recovery agent (full/none/summary).
 
     Returns:
         Exit code (0 = success).
@@ -391,7 +402,8 @@ def run_pipeline(
             recovery_agent_name = get_agent_name(recovery_agent)
             recovery_model_short = shorten_model_name(recovery_model)
             recovery_job_name = (
-                job_name or f"{recovery_agent_name}-{recovery_model_short}-{timestamp}"
+                job_name
+                or f"{recovery_agent_name}-{message_mode}-{recovery_model_short}-{timestamp}"
             )
             if max_iterations > 1:
                 recovery_job_name = f"{recovery_job_name}-iter{iteration}"
@@ -408,6 +420,7 @@ def run_pipeline(
             harbor_env=harbor_env,
             dataset_version=dataset_version,
             reorganize=False,  # Already reorganized above (or by previous iteration)
+            message_mode=message_mode,
         )
 
         if rc != 0:

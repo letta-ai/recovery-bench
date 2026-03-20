@@ -6,8 +6,6 @@ from recovery_bench.agents import (
     RecoveryInstalledAgent,
     RecoveryLettaCode,
     RecoveryTerminus,
-    RecoveryTerminusWithMessageSummaries,
-    RecoveryTerminusWithoutMessages,
 )
 
 __all__ = [
@@ -16,6 +14,4 @@ __all__ = [
     "RecoveryInstalledAgent",
     "RecoveryLettaCode",
     "RecoveryTerminus",
-    "RecoveryTerminusWithMessageSummaries",
-    "RecoveryTerminusWithoutMessages",
 ]

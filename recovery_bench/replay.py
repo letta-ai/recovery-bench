@@ -222,5 +222,3 @@ async def replay_via_tmux(
         return last_output or ""
     except Exception:
         return ""
-
-
