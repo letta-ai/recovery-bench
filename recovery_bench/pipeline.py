@@ -12,7 +12,6 @@ Functions are ordered low-level → high-level:
 import json
 import logging
 import os
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -236,16 +235,8 @@ def generate_recovery_traces(
     for task_id in task_ids:
         cmd.extend(["--task-name", task_id])
 
-    logger.info(f"Running: {' '.join(cmd)}")
-
-    try:
-        result = subprocess.run(cmd, env=env, check=True)
-        return result.returncode
-    except subprocess.CalledProcessError as e:
-        return e.returncode
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return 1
+    result = run_command(cmd, env=env)
+    return result.returncode
 
 
 def run_recovery(
