@@ -401,9 +401,8 @@ def run_pipeline(
         else:
             recovery_agent_name = get_agent_name(recovery_agent)
             recovery_model_short = shorten_model_name(recovery_model)
-            mode_suffix = f"-{message_mode}" if message_mode and message_mode != "full" else ""
             recovery_job_name = (
-                job_name or f"{recovery_agent_name}-{recovery_model_short}{mode_suffix}-{timestamp}"
+                job_name or f"{recovery_agent_name}-{message_mode}-{recovery_model_short}-{timestamp}"
             )
             if max_iterations > 1:
                 recovery_job_name = f"{recovery_job_name}-iter{iteration}"
