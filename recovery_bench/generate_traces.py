@@ -50,12 +50,6 @@ def main():
         "--n-concurrent", type=int, default=8, help="Number of concurrent processes"
     )
     parser.add_argument(
-        "--cleanup-container",
-        action="store_true",
-        default=False,
-        help="Cleanup Docker containers before running",
-    )
-    parser.add_argument(
         "--dataset-version",
         type=str,
         default="2.0",
@@ -144,7 +138,6 @@ def main():
         n_concurrent=args.n_concurrent,
         dataset_version=args.dataset_version,
         job_name=args.job_name,
-        cleanup_container=args.cleanup_container,
         harbor_env=args.env,
         message_mode=args.message_mode,
     )
