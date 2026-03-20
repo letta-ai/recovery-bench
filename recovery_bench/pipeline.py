@@ -18,7 +18,6 @@ from pathlib import Path
 from .agents import AGENT_REGISTRY
 from .utils import (
     aggregate_usage,
-    cleanup_docker,
     get_agent_name,
     get_unsolved_tasks,
     reorganize_directories,
@@ -308,7 +307,6 @@ def run_pipeline(
     n_concurrent: int = 8,
     dataset_version: str = "2.0",
     job_name: str | None = None,
-    cleanup_container: bool = False,
     harbor_env: str | None = None,
     message_mode: str | None = None,
 ) -> int:
@@ -331,7 +329,6 @@ def run_pipeline(
         n_concurrent: Number of concurrent processes.
         dataset_version: Terminal-Bench dataset version.
         job_name: Custom job name for recovery output.
-        cleanup_container: Whether to cleanup Docker before running.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         message_mode: Message mode for recovery agent (full/none/summary).
 
@@ -339,9 +336,6 @@ def run_pipeline(
         Exit code (0 = success).
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    if cleanup_container:
-        cleanup_docker()
 
     # Step 1: Generate initial traces or resume from existing
     if resume_initial:
