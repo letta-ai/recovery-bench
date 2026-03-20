@@ -20,9 +20,8 @@ from harbor.models.agent.context import AgentContext
 
 from recovery_bench.prompts import (
     LETTA_CODE_PROMPT_PREFIX,
+    build_message_context,
     build_recovery_instruction,
-    format_messages_as_text,
-    summarize_messages,
 )
 from recovery_bench.replay import (
     find_and_parse_trajectory,
@@ -431,16 +430,6 @@ class RecoveryLettaCode(LettaCode):
         logger.info(f"Replaying {len(commands)} operations from previous trajectory...")
         await replay_via_exec(environment, commands)
 
-    async def _build_message_context(self) -> str | None:
-        """Build message context string based on message_mode."""
-        if self._message_mode == "none" or not self._replay_messages:
-            return None
-        if self._message_mode == "summary":
-            model = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
-            return await summarize_messages(self._replay_messages, model)
-        # full mode
-        return format_messages_as_text(self._replay_messages)
-
     async def run(
         self,
         instruction: str,
@@ -448,6 +437,9 @@ class RecoveryLettaCode(LettaCode):
         context: AgentContext,
     ) -> None:
         """Prepend recovery prompt, then delegate to LettaCode."""
-        message_context = await self._build_message_context()
+        model = self.model_name or os.environ.get("LETTA_MODEL", "").strip()
+        message_context = await build_message_context(
+            self._replay_messages, self._message_mode, model
+        )
         recovery_instruction = build_recovery_instruction(instruction, message_context)
         await super().run(recovery_instruction, environment, context)

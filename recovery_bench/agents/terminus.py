@@ -22,8 +22,8 @@ from harbor.models.trajectories import Step
 
 from recovery_bench.prompts import (
     SUMMARY_MESSAGE_TEMPLATE,
+    build_message_context,
     build_recovery_instruction,
-    summarize_messages,
 )
 from recovery_bench.replay import (
     extract_commands,
@@ -114,18 +114,27 @@ class RecoveryTerminus(Terminus2):
         save_usage(self.logs_dir, context)
 
     async def _prepare_messages_for_chat(self) -> list[dict]:
-        """Prepare messages for chat injection based on message_mode."""
+        """Prepare messages for chat injection based on message_mode.
+
+        ``full`` injects raw trajectory messages.  ``summary`` uses
+        :func:`build_message_context` for the LLM summary, then wraps it
+        in a single assistant message.  ``none`` returns nothing.
+        """
         if self._message_mode == "none" or not self._replay_messages:
             return []
 
-        if self._message_mode == "summary":
-            summary = await summarize_messages(self._replay_messages, self.model_name)
+        if self._message_mode == "full":
+            return list(self._replay_messages)
+
+        # summary — reuse the shared helper for the LLM call
+        summary = await build_message_context(
+            self._replay_messages, self._message_mode, self.model_name
+        )
+        if summary:
             return [
                 {"role": "assistant", "content": SUMMARY_MESSAGE_TEMPLATE.format(summary=summary)}
             ]
-
-        # full mode
-        return list(self._replay_messages)
+        return []
 
     async def run(
         self,

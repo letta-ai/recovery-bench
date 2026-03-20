@@ -75,6 +75,30 @@ def format_messages_as_text(messages: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+async def build_message_context(
+    messages: list[dict],
+    message_mode: str,
+    model: str,
+) -> str | None:
+    """Build message context text from trajectory messages.
+
+    Args:
+        messages: Conversation messages from the previous trajectory.
+        message_mode: One of ``"full"``, ``"none"``, ``"summary"``.
+        model: LiteLLM model identifier (used for summary mode).
+
+    Returns:
+        Formatted text for ``full``, summarized text for ``summary``,
+        or ``None`` for ``none`` / empty messages.
+    """
+    if message_mode == "none" or not messages:
+        return None
+    if message_mode == "summary":
+        return await summarize_messages(messages, model)
+    # full
+    return format_messages_as_text(messages)
+
+
 async def summarize_messages(messages: list[dict], model: str) -> str:
     """Summarize trajectory messages using litellm.
 
