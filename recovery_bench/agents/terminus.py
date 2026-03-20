@@ -4,14 +4,12 @@ This agent reads previous failed trajectories, replays commands to restore
 the environment state during setup(), then runs Terminus2's agent loop
 with a recovery-oriented prompt.
 
-Variants:
-- RecoveryTerminus: Full message history recovery
-- RecoveryTerminusWithoutMessages: Environment-only recovery
-- RecoveryTerminusWithMessageSummaries: Summarized history recovery
-- BaselineTerminus: Fresh start (no replay) for comparison
+Message modes (controlled via ``message_mode`` kwarg):
+- ``full``: Inject full message history from previous trajectory
+- ``none``: Environment-only recovery (no message context)
+- ``summary``: Summarize previous messages and inject summary
 """
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -23,10 +21,9 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
 from recovery_bench.prompts import (
-    SUMMARIZE_MESSAGES_PROMPT,
-    SUMMARY_FALLBACK,
     SUMMARY_MESSAGE_TEMPLATE,
     build_recovery_instruction,
+    summarize_messages,
 )
 from recovery_bench.replay import (
     extract_commands,
@@ -37,22 +34,33 @@ from recovery_bench.utils import find_trajectory_folder, save_usage
 
 logger = logging.getLogger(__name__)
 
+_VALID_MESSAGE_MODES = ("full", "none", "summary")
+
 
 class RecoveryTerminus(Terminus2):
     """Terminus2 agent extended with trajectory replay for recovery.
 
     During setup(), reads a previous failed trajectory, replays all commands
-    to restore the corrupted environment state. During run(), injects prior
-    messages and runs Terminus2's agent loop with a recovery prompt.
+    to restore the corrupted environment state. During run(), optionally
+    injects prior messages and runs Terminus2's agent loop with a recovery
+    prompt.
+
+    Args:
+        message_mode: How to use messages from the previous trajectory.
+            ``"full"`` injects raw messages, ``"none"`` skips them,
+            ``"summary"`` summarizes via LLM first.  Default: ``"full"``.
+        model_kwargs: Extra model kwargs forwarded to Terminus2.
     """
 
-    def __init__(self, model_kwargs: dict = None, **kwargs):
-        # model_kwargs from config files (e.g. reasoning_effort, temperature)
-        # are forwarded as direct params to Terminus2
+    def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
         super().__init__(**(model_kwargs or {}), **kwargs)
 
+        if message_mode not in _VALID_MESSAGE_MODES:
+            raise ValueError(
+                f"Invalid message_mode={message_mode!r}. Must be one of {_VALID_MESSAGE_MODES}"
+            )
+        self._message_mode = message_mode
         self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
-        self._include_messages = True
         self._last_replay_output = ""
         self._replay_messages: list[dict] = []
 
@@ -111,6 +119,20 @@ class RecoveryTerminus(Terminus2):
         self._dump_trajectory()
         save_usage(self.logs_dir, context)
 
+    async def _prepare_messages_for_chat(self) -> list[dict]:
+        """Prepare messages for chat injection based on message_mode."""
+        if self._message_mode == "none" or not self._replay_messages:
+            return []
+
+        if self._message_mode == "summary":
+            summary = await summarize_messages(self._replay_messages, self.model_name)
+            return [
+                {"role": "assistant", "content": SUMMARY_MESSAGE_TEMPLATE.format(summary=summary)}
+            ]
+
+        # full mode
+        return list(self._replay_messages)
+
     async def run(
         self,
         instruction: str,
@@ -125,9 +147,8 @@ class RecoveryTerminus(Terminus2):
             raise RuntimeError("Session is not set")
 
         # Inject prior conversation messages into chat history
-        if self._include_messages and self._replay_messages:
-            for msg in self._replay_messages:
-                self._chat._messages.append(msg)
+        for msg in await self._prepare_messages_for_chat():
+            self._chat._messages.append(msg)
 
         # Build recovery prompt using terminus2's template format
         terminal_state = self._limit_output_length(self._last_replay_output)
@@ -181,52 +202,3 @@ class BaselineTerminus(Terminus2):
         """Run Terminus2, then save usage.json for aggregation."""
         await super().run(instruction, environment, context)
         save_usage(self.logs_dir, context)
-
-
-class RecoveryTerminusWithoutMessages(RecoveryTerminus):
-    """Recovery agent that only restores environment state (no message history)."""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._include_messages = False
-
-    @staticmethod
-    def name() -> str:
-        return "recovery-terminus-without-messages"
-
-
-class RecoveryTerminusWithMessageSummaries(RecoveryTerminus):
-    """Recovery agent that injects a summarized version of the previous
-    conversation history instead of the full messages.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._include_messages = True
-
-    @staticmethod
-    def name() -> str:
-        return "recovery-terminus-with-summaries"
-
-    async def run(
-        self,
-        instruction: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        """Summarize replay messages before running the agent loop."""
-        if self._replay_messages:
-            summary = await self._summarize_messages(self._replay_messages)
-            self._replay_messages = [
-                {"role": "assistant", "content": SUMMARY_MESSAGE_TEMPLATE.format(summary=summary)}
-            ]
-        await super().run(instruction, environment, context)
-
-    async def _summarize_messages(self, messages: list[dict]) -> str:
-        """Use the LLM to summarize previous conversation messages."""
-        prompt = SUMMARIZE_MESSAGES_PROMPT + json.dumps(messages, indent=2)
-        try:
-            response = await self._llm.call(prompt=prompt, message_history=[])
-            return response.content
-        except Exception:
-            return SUMMARY_FALLBACK

@@ -9,8 +9,6 @@ from recovery_bench.agents.letta_code import LettaCode, RecoveryLettaCode
 from recovery_bench.agents.terminus import (
     BaselineTerminus,
     RecoveryTerminus,
-    RecoveryTerminusWithMessageSummaries,
-    RecoveryTerminusWithoutMessages,
 )
 
 __all__ = [
@@ -19,8 +17,6 @@ __all__ = [
     "RecoveryInstalledAgent",
     "RecoveryLettaCode",
     "RecoveryTerminus",
-    "RecoveryTerminusWithMessageSummaries",
-    "RecoveryTerminusWithoutMessages",
     "resolve_harbor_agent",
 ]
 
@@ -28,8 +24,6 @@ __all__ = [
 AGENT_REGISTRY: dict[str, str] = {
     # Recovery agents (replay + modified instruction)
     "recovery-terminus": "recovery_bench.agents.terminus:RecoveryTerminus",
-    "recovery-terminus-without-messages": "recovery_bench.agents.terminus:RecoveryTerminusWithoutMessages",
-    "recovery-terminus-with-summaries": "recovery_bench.agents.terminus:RecoveryTerminusWithMessageSummaries",
     "recovery-letta-code": "recovery_bench.agents.letta_code:RecoveryLettaCode",
     # Baseline agents (fresh start, no replay)
     "baseline-terminus": "recovery_bench.agents.terminus:BaselineTerminus",
