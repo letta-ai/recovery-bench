@@ -21,7 +21,6 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
 from recovery_bench.prompts import (
-    SUMMARY_MESSAGE_TEMPLATE,
     build_message_context,
     build_recovery_instruction,
 )
@@ -113,29 +112,6 @@ class RecoveryTerminus(Terminus2):
         self._dump_trajectory()
         save_usage(self.logs_dir, context)
 
-    async def _prepare_messages_for_chat(self) -> list[dict]:
-        """Prepare messages for chat injection based on message_mode.
-
-        ``full`` injects raw trajectory messages.  ``summary`` uses
-        :func:`build_message_context` for the LLM summary, then wraps it
-        in a single assistant message.  ``none`` returns nothing.
-        """
-        if self._message_mode == "none" or not self._replay_messages:
-            return []
-
-        if self._message_mode == "full":
-            return list(self._replay_messages)
-
-        # summary — reuse the shared helper for the LLM call
-        summary = await build_message_context(
-            self._replay_messages, self._message_mode, self.model_name
-        )
-        if summary:
-            return [
-                {"role": "assistant", "content": SUMMARY_MESSAGE_TEMPLATE.format(summary=summary)}
-            ]
-        return []
-
     async def run(
         self,
         instruction: str,
@@ -149,9 +125,12 @@ class RecoveryTerminus(Terminus2):
         if self._session is None:
             raise RuntimeError("Session is not set")
 
-        # Inject prior conversation messages into chat history
-        for msg in await self._prepare_messages_for_chat():
-            self._chat._messages.append(msg)
+        # Inject prior conversation context as a single assistant message
+        context_text = await build_message_context(
+            self._replay_messages, self._message_mode, self.model_name
+        )
+        if context_text:
+            self._chat._messages.append({"role": "assistant", "content": context_text})
 
         # Build recovery prompt using terminus2's template format
         terminal_state = self._limit_output_length(self._last_replay_output)

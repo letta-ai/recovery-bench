@@ -57,8 +57,6 @@ SUMMARIZE_MESSAGES_PROMPT = (
     "focusing on what was attempted and what went wrong:\n\n"
 )
 
-SUMMARY_MESSAGE_TEMPLATE = "Summary of previous attempts:\n{summary}"
-
 SUMMARY_FALLBACK = "Previous attempts to complete this task failed."
 
 
