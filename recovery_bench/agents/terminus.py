@@ -82,6 +82,35 @@ class RecoveryTerminus(Terminus2):
 
         self._replay_messages = messages
 
+    def _populate_context(self, context: AgentContext, actual_episodes: int) -> None:
+        """Populate *context* with metrics, dump trajectory, and save usage.
+
+        This mirrors the ``finally`` block in ``Terminus2.run()`` — keep in
+        sync when upgrading the harbor dependency.
+        """
+        context.rollout_details = self._chat.rollout_details + self._subagent_rollout_details
+        context.n_input_tokens = (
+            self._chat.total_input_tokens + self._subagent_metrics.total_prompt_tokens
+        )
+        context.n_output_tokens = (
+            self._chat.total_output_tokens + self._subagent_metrics.total_completion_tokens
+        )
+        context.n_cache_tokens = (
+            self._chat.total_cache_tokens + self._subagent_metrics.total_cached_tokens
+        )
+        total_cost = self._chat.total_cost + self._subagent_metrics.total_cost_usd
+        context.cost_usd = total_cost if total_cost > 0 else None
+        context.metadata = {
+            "n_episodes": actual_episodes,
+            "api_request_times_msec": self._api_request_times,
+            "summarization_count": self._summarization_count,
+        }
+        if self._store_all_messages:
+            context.metadata["all_messages"] = self._chat.messages
+
+        self._dump_trajectory()
+        save_usage(self.logs_dir, context)
+
     async def run(
         self,
         instruction: str,
@@ -126,29 +155,7 @@ class RecoveryTerminus(Terminus2):
                 original_instruction=instruction,
             )
         finally:
-            # Populate context with metrics (same as Terminus2.run())
-            context.rollout_details = self._chat.rollout_details + self._subagent_rollout_details
-            context.n_input_tokens = (
-                self._chat.total_input_tokens + self._subagent_metrics.total_prompt_tokens
-            )
-            context.n_output_tokens = (
-                self._chat.total_output_tokens + self._subagent_metrics.total_completion_tokens
-            )
-            context.n_cache_tokens = (
-                self._chat.total_cache_tokens + self._subagent_metrics.total_cached_tokens
-            )
-            total_cost = self._chat.total_cost + self._subagent_metrics.total_cost_usd
-            context.cost_usd = total_cost if total_cost > 0 else None
-            context.metadata = {
-                "n_episodes": actual_episodes,
-                "api_request_times_msec": self._api_request_times,
-                "summarization_count": self._summarization_count,
-            }
-            if self._store_all_messages:
-                context.metadata["all_messages"] = self._chat.messages
-
-            self._dump_trajectory()
-            save_usage(self.logs_dir, context)
+            self._populate_context(context, actual_episodes)
 
 
 class BaselineTerminus(Terminus2):
