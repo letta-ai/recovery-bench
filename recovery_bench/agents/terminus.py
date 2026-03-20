@@ -125,18 +125,14 @@ class RecoveryTerminus(Terminus2):
         if self._session is None:
             raise RuntimeError("Session is not set")
 
-        # Inject prior conversation context as a single assistant message
-        context_text = await build_message_context(
-            self._replay_messages, self._message_mode, self.model_name
-        )
-        if context_text:
-            self._chat._messages.append({"role": "assistant", "content": context_text})
-
         # Build recovery prompt using terminus2's template format
         terminal_state = self._limit_output_length(self._last_replay_output)
+        message_context = await build_message_context(
+            self._replay_messages, self._message_mode, self.model_name
+        )
 
         initial_prompt = self._prompt_template.format(
-            instruction=build_recovery_instruction(instruction),
+            instruction=build_recovery_instruction(instruction, message_context),
             terminal_state=terminal_state,
         )
 
