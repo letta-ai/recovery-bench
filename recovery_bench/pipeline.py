@@ -14,7 +14,6 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List
 
 from .agents import AGENT_REGISTRY
 from .utils import (
@@ -66,13 +65,46 @@ def resolve_agent(agent_str: str) -> tuple[str, bool, dict[str, str]]:
     return agent_str, False, {}
 
 
-def _append_agent_kwargs(
-    cmd: list[str],
+def _build_harbor_cmd(
+    model: str,
+    n_concurrent: int,
+    dataset_version: str = "2.0",
+    agent: str | None = None,
+    job_name: str | None = None,
+    task_ids: list[str] | None = None,
     model_kwargs: dict | None = None,
     letta_code_model: str | None = None,
-    extra_kwargs: dict[str, str] | None = None,
-) -> None:
-    """Append ``--agent-kwarg`` flags to a harbor command."""
+    harbor_env: str | None = None,
+) -> list[str]:
+    """Build the ``harbor run`` command list.
+
+    Handles agent resolution, dataset/model/concurrency flags, optional
+    job-name, env, task-ids, and agent-kwargs.
+    """
+    cmd = ["harbor", "run", "--dataset", f"terminal-bench@{dataset_version}"]
+
+    # Resolve agent → import path or Harbor name
+    extra_kwargs: dict[str, str] = {}
+    if agent:
+        agent_ref, is_import_path, extra_kwargs = resolve_agent(agent)
+        if is_import_path:
+            cmd.extend(["--agent-import-path", agent_ref])
+        else:
+            cmd.extend(["--agent", agent_ref])
+    else:
+        cmd.extend(["--agent", "terminus-2"])
+
+    cmd.extend(["--model", model, "--n-concurrent", str(n_concurrent)])
+
+    if job_name:
+        cmd.extend(["--job-name", job_name])
+    if harbor_env:
+        cmd.extend(["--env", harbor_env])
+    if task_ids:
+        for task_id in task_ids:
+            cmd.extend(["--task-name", task_id])
+
+    # Append --agent-kwarg flags
     if model_kwargs:
         cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
     if letta_code_model:
@@ -81,13 +113,15 @@ def _append_agent_kwargs(
         for key, value in extra_kwargs.items():
             cmd.extend(["--agent-kwarg", f"{key}={value}"])
 
+    return cmd
+
 
 def generate_initial_traces(
     model: str,
     job_name: str,
     dataset_version: str = "2.0",
     n_concurrent: int = 6,
-    task_ids: List[str] | None = None,
+    task_ids: list[str] | None = None,
     agent: str | None = None,
     model_kwargs: dict | None = None,
     letta_code_model: str | None = None,
@@ -114,47 +148,16 @@ def generate_initial_traces(
     """
     logger.info(f"Generating initial traces for {model}...")
 
-    cmd = [
-        "harbor",
-        "run",
-        "--dataset",
-        f"terminal-bench@{dataset_version}",
-    ]
-
-    # Resolve agent name → import path or Harbor name
-    extra_kwargs: dict[str, str] = {}
-    if agent:
-        agent_ref, is_import_path, extra_kwargs = resolve_agent(agent)
-        if is_import_path:
-            cmd.extend(["--agent-import-path", agent_ref])
-        else:
-            cmd.extend(["--agent", agent_ref])
-    else:
-        cmd.extend(["--agent", "terminus-2"])
-
-    cmd.extend(
-        [
-            "--model",
-            model,
-            "--job-name",
-            job_name,
-            "--n-concurrent",
-            str(n_concurrent),
-        ]
-    )
-
-    if harbor_env:
-        cmd.extend(["--env", harbor_env])
-
-    if task_ids:
-        for task_id in task_ids:
-            cmd.extend(["--task-name", task_id])
-
-    _append_agent_kwargs(
-        cmd,
+    cmd = _build_harbor_cmd(
+        model=model,
+        n_concurrent=n_concurrent,
+        dataset_version=dataset_version,
+        agent=agent,
+        job_name=job_name,
+        task_ids=task_ids,
         model_kwargs=model_kwargs,
         letta_code_model=letta_code_model,
-        extra_kwargs=extra_kwargs,
+        harbor_env=harbor_env,
     )
 
     result = run_command(cmd)
@@ -166,7 +169,7 @@ def generate_initial_traces(
 def generate_recovery_traces(
     traces_folder: str,
     model: str,
-    task_ids: List[str],
+    task_ids: list[str],
     job_name: str | None = None,
     agent: str = "recovery-terminus",
     n_concurrent: int = 4,
@@ -192,48 +195,20 @@ def generate_recovery_traces(
     Returns:
         Exit code from harbor run.
     """
-    # Resolve agent name → ref + extra kwargs
-    agent_ref, is_import_path, extra_kwargs = resolve_agent(agent)
-
     env = os.environ.copy()
     env["TRAJECTORY_FOLDER"] = traces_folder
 
-    cmd = [
-        "harbor",
-        "run",
-        "--dataset",
-        f"terminal-bench@{dataset_version}",
-    ]
-
-    if is_import_path:
-        cmd.extend(["--agent-import-path", agent_ref])
-    else:
-        cmd.extend(["--agent", agent_ref])
-
-    cmd.extend(
-        [
-            "--model",
-            model,
-            "--n-concurrent",
-            str(n_concurrent),
-        ]
-    )
-
-    if job_name:
-        cmd.extend(["--job-name", job_name])
-
-    if harbor_env:
-        cmd.extend(["--env", harbor_env])
-
-    _append_agent_kwargs(
-        cmd,
+    cmd = _build_harbor_cmd(
+        model=model,
+        n_concurrent=n_concurrent,
+        dataset_version=dataset_version,
+        agent=agent,
+        job_name=job_name,
+        task_ids=task_ids,
         model_kwargs=model_kwargs,
         letta_code_model=letta_code_model,
-        extra_kwargs=extra_kwargs,
+        harbor_env=harbor_env,
     )
-
-    for task_id in task_ids:
-        cmd.extend(["--task-name", task_id])
 
     result = run_command(cmd, env=env)
     return result.returncode
@@ -245,7 +220,7 @@ def run_recovery(
     job_name: str,
     agent: str = "recovery-terminus",
     n_concurrent: int = 4,
-    task_ids: List[str] | None = None,
+    task_ids: list[str] | None = None,
     model_kwargs: dict | None = None,
     letta_code_model: str | None = None,
     harbor_env: str | None = None,
@@ -320,7 +295,7 @@ def run_pipeline(
     resume_initial: str | None = None,
     initial_agent: str | None = None,
     recovery_agent: str = "recovery-terminus",
-    task_ids: List[str] | None = None,
+    task_ids: list[str] | None = None,
     n_concurrent: int = 8,
     max_iterations: int = 1,
     dataset_version: str = "2.0",
