@@ -21,6 +21,7 @@ from .utils import (
     get_agent_name,
     get_unsolved_tasks,
     reorganize_directories,
+    resolve_config,
     run_command,
     shorten_model_name,
 )
@@ -71,8 +72,7 @@ def _build_harbor_cmd(
     agent: str | None = None,
     job_name: str | None = None,
     task_ids: list[str] | None = None,
-    model_kwargs: dict | None = None,
-    letta_code_model: str | None = None,
+    agent_kwargs: dict | None = None,
     harbor_env: str | None = None,
     message_mode: str | None = None,
 ) -> list[str]:
@@ -105,15 +105,12 @@ def _build_harbor_cmd(
             cmd.extend(["--task-name", task_id])
 
     # Append --agent-kwarg flags
-    if model_kwargs:
-        cmd.extend(["--agent-kwarg", f"model_kwargs={json.dumps(model_kwargs)}"])
-    if letta_code_model:
-        cmd.extend(["--agent-kwarg", f"letta_code_model={letta_code_model}"])
+    all_kwargs = {**(agent_kwargs or {}), **(extra_kwargs or {})}
     if message_mode:
-        cmd.extend(["--agent-kwarg", f"message_mode={message_mode}"])
-    if extra_kwargs:
-        for key, value in extra_kwargs.items():
-            cmd.extend(["--agent-kwarg", f"{key}={value}"])
+        all_kwargs["message_mode"] = message_mode
+    for key, value in all_kwargs.items():
+        serialized = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+        cmd.extend(["--agent-kwarg", f"{key}={serialized}"])
 
     return cmd
 
@@ -125,8 +122,7 @@ def generate_initial_traces(
     n_concurrent: int = 6,
     task_ids: list[str] | None = None,
     agent: str | None = None,
-    model_kwargs: dict | None = None,
-    letta_code_model: str | None = None,
+    agent_kwargs: dict | None = None,
     harbor_env: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run.
@@ -138,8 +134,7 @@ def generate_initial_traces(
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to run. None = all tasks.
         agent: Agent name, registry name, or import path. None = terminus-2.
-        model_kwargs: Extra model kwargs (e.g. reasoning effort).
-        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
+        agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
 
     Returns:
@@ -157,8 +152,7 @@ def generate_initial_traces(
         agent=agent,
         job_name=job_name,
         task_ids=task_ids,
-        model_kwargs=model_kwargs,
-        letta_code_model=letta_code_model,
+        agent_kwargs=agent_kwargs,
         harbor_env=harbor_env,
     )
 
@@ -175,8 +169,7 @@ def generate_recovery_traces(
     job_name: str | None = None,
     agent: str = "recovery-terminus",
     n_concurrent: int = 4,
-    model_kwargs: dict | None = None,
-    letta_code_model: str | None = None,
+    agent_kwargs: dict | None = None,
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
     message_mode: str | None = None,
@@ -190,8 +183,7 @@ def generate_recovery_traces(
         job_name: Job name for output directory.
         agent: Recovery agent name, import path, or installed:<name>.
         n_concurrent: Number of concurrent processes.
-        model_kwargs: Extra model kwargs (e.g. reasoning effort).
-        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
+        agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
         message_mode: Message mode for recovery agent (full/none/summary).
@@ -209,8 +201,7 @@ def generate_recovery_traces(
         agent=agent,
         job_name=job_name,
         task_ids=task_ids,
-        model_kwargs=model_kwargs,
-        letta_code_model=letta_code_model,
+        agent_kwargs=agent_kwargs,
         harbor_env=harbor_env,
         message_mode=message_mode,
     )
@@ -226,8 +217,7 @@ def run_recovery(
     agent: str = "recovery-terminus",
     n_concurrent: int = 4,
     task_ids: list[str] | None = None,
-    model_kwargs: dict | None = None,
-    letta_code_model: str | None = None,
+    agent_kwargs: dict | None = None,
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
     reorganize: bool = True,
@@ -242,8 +232,7 @@ def run_recovery(
         agent: Recovery agent name, import path, or installed:<name>.
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
-        model_kwargs: Extra model kwargs (e.g. reasoning effort).
-        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh').
+        agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
         reorganize: Whether to reorganize directories with hash prefixes first.
@@ -271,8 +260,7 @@ def run_recovery(
         job_name=job_name,
         agent=agent,
         n_concurrent=n_concurrent,
-        model_kwargs=model_kwargs,
-        letta_code_model=letta_code_model,
+        agent_kwargs=agent_kwargs,
         harbor_env=harbor_env,
         dataset_version=dataset_version,
         message_mode=message_mode,
@@ -295,11 +283,7 @@ def run_recovery(
 
 def run_pipeline(
     initial_model: str | None = None,
-    initial_model_kwargs: dict | None = None,
-    initial_letta_code_model: str | None = None,
     recovery_model: str | None = None,
-    recovery_model_kwargs: dict | None = None,
-    recovery_letta_code_model: str | None = None,
     resume_initial: str | None = None,
     initial_agent: str | None = None,
     recovery_agent: str = "recovery-terminus",
@@ -316,12 +300,10 @@ def run_pipeline(
     recovery on unsolved tasks.
 
     Args:
-        initial_model: Model name for initial traces. Required unless resume_initial is set.
-        initial_model_kwargs: Extra model kwargs for initial traces.
-        initial_letta_code_model: Letta Code model id for initial traces.
-        recovery_model: Model name for recovery. None = skip recovery.
-        recovery_model_kwargs: Extra model kwargs for recovery.
-        recovery_letta_code_model: Letta Code model id for recovery.
+        initial_model: Model name or JSON config path for initial traces.
+            Required unless resume_initial is set.
+        recovery_model: Model name or JSON config path for recovery.
+            None = skip recovery.
         resume_initial: Path to existing initial traces (skips generation).
         initial_agent: Agent name or import path for initial traces.
         recovery_agent: Recovery agent name, import path, or installed:<name>.
@@ -337,6 +319,14 @@ def run_pipeline(
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # Resolve model configs (raw string or JSON path → model name + agent kwargs)
+    initial_model_name, initial_agent_kwargs = (
+        resolve_config(initial_model) if initial_model else (None, {})
+    )
+    recovery_model_name, recovery_agent_kwargs = (
+        resolve_config(recovery_model) if recovery_model else (None, {})
+    )
+
     # Step 1: Generate initial traces or resume from existing
     if resume_initial:
         if not Path(resume_initial).exists():
@@ -346,17 +336,16 @@ def run_pipeline(
         logger.info(f"Resuming from existing initial trajectories at {initial_traces_dir}")
     else:
         initial_agent_name = get_agent_name(initial_agent) if initial_agent else "terminus-2"
-        model_short = shorten_model_name(initial_model)
+        model_short = shorten_model_name(initial_model_name)
         initial_run_id = f"initial-{initial_agent_name}-{model_short}-{timestamp}"
         initial_traces_dir = generate_initial_traces(
-            model=initial_model,
+            model=initial_model_name,
             job_name=initial_run_id,
             dataset_version=dataset_version,
             n_concurrent=n_concurrent,
             task_ids=task_ids,
             agent=initial_agent,
-            model_kwargs=initial_model_kwargs,
-            letta_code_model=initial_letta_code_model,
+            agent_kwargs=initial_agent_kwargs,
             harbor_env=harbor_env,
         )
 
@@ -373,7 +362,7 @@ def run_pipeline(
             )
 
     # Stop here if no recovery model specified
-    if not recovery_model:
+    if not recovery_model_name:
         logger.info(f"Initial traces complete: {initial_traces_dir}")
         return 0
 
@@ -382,20 +371,19 @@ def run_pipeline(
 
     # Step 3: Run recovery on unsolved tasks
     recovery_agent_name = get_agent_name(recovery_agent)
-    recovery_model_short = shorten_model_name(recovery_model)
+    recovery_model_short = shorten_model_name(recovery_model_name)
     recovery_job_name = (
         job_name or f"{recovery_agent_name}-{message_mode}-{recovery_model_short}-{timestamp}"
     )
 
     recovery_traces_dir, rc = run_recovery(
         traces_folder=initial_traces_dir,
-        model=recovery_model,
+        model=recovery_model_name,
         job_name=recovery_job_name,
         agent=recovery_agent,
         n_concurrent=n_concurrent,
         task_ids=task_ids if resume_initial else None,
-        model_kwargs=recovery_model_kwargs,
-        letta_code_model=recovery_letta_code_model,
+        agent_kwargs=recovery_agent_kwargs,
         harbor_env=harbor_env,
         dataset_version=dataset_version,
         reorganize=False,  # Already reorganized above
