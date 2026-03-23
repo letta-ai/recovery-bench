@@ -11,7 +11,6 @@ Message modes (controlled via ``message_mode`` kwarg):
 """
 
 import logging
-import os
 from datetime import datetime, timezone
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2
@@ -20,21 +19,14 @@ from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
-from recovery_bench.prompts import (
-    build_message_context,
-    build_recovery_instruction,
-)
-from recovery_bench.replay import (
-    extract_commands,
-    extract_messages,
-    replay_via_tmux,
-)
-from recovery_bench.utils import find_trajectory_folder, save_usage
+from recovery_bench.agents.recovery_mixin import RecoveryMixin
+from recovery_bench.replay import replay_via_tmux
+from recovery_bench.utils import save_usage
 
 logger = logging.getLogger(__name__)
 
 
-class RecoveryTerminus(Terminus2):
+class RecoveryTerminus(RecoveryMixin, Terminus2):
     """Terminus2 agent extended with trajectory replay for recovery.
 
     During setup(), reads a previous failed trajectory, replays all commands
@@ -51,11 +43,8 @@ class RecoveryTerminus(Terminus2):
 
     def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
         super().__init__(**(model_kwargs or {}), **kwargs)
-
-        self._message_mode = message_mode
-        self._base_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
+        self._init_recovery(message_mode)
         self._last_replay_output = ""
-        self._replay_messages: list[dict] = []
 
     @staticmethod
     def name() -> str:
@@ -66,22 +55,13 @@ class RecoveryTerminus(Terminus2):
         await super().setup(environment)
 
         # Read and replay trajectories during setup (not counted against agent timeout)
-        trajectory_folder = find_trajectory_folder(self.logs_dir, self._base_folder)
-        if trajectory_folder is None:
-            logger.info("No trajectory found, starting fresh")
-            return
-
-        commands = extract_commands(trajectory_folder)
-        messages = extract_messages(trajectory_folder)
-
+        commands, _ = self._parse_trajectory()
         if commands:
             self._last_replay_output = await replay_via_tmux(self._session, commands)
             logger.info(f"Replayed {len(commands)} commands from previous trajectory")
         else:
             logger.info("No commands found in trajectory, starting fresh")
             self._last_replay_output = ""
-
-        self._replay_messages = messages
 
     def _populate_context(self, context: AgentContext, actual_episodes: int) -> None:
         """Populate *context* with metrics, dump trajectory, and save usage.
@@ -127,12 +107,10 @@ class RecoveryTerminus(Terminus2):
 
         # Build recovery prompt using terminus2's template format
         terminal_state = self._limit_output_length(self._last_replay_output)
-        message_context = await build_message_context(
-            self._replay_messages, self._message_mode, self.model_name
-        )
+        recovery_instruction = await self._build_recovery_instruction(instruction)
 
         initial_prompt = self._prompt_template.format(
-            instruction=build_recovery_instruction(instruction, message_context),
+            instruction=recovery_instruction,
             terminal_state=terminal_state,
         )
 
