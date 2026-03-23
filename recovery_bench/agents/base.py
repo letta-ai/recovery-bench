@@ -7,19 +7,12 @@ inherited automatically — no manual delegation required.
 """
 
 import logging
-import os
 
 from harbor.agents.factory import AgentFactory
 from harbor.models.agent.name import AgentName
 
-from recovery_bench.prompts import (
-    build_message_context,
-    build_recovery_instruction,
-)
-from recovery_bench.replay import (
-    find_and_parse_trajectory,
-    replay_via_exec,
-)
+from recovery_bench.agents.recovery_mixin import RecoveryMixin
+from recovery_bench.replay import replay_via_exec
 from recovery_bench.utils import save_usage
 
 logger = logging.getLogger(__name__)
@@ -82,13 +75,10 @@ class RecoveryInstalledAgent:
 
         if inner_cls not in _recovery_class_cache:
 
-            class Recovery(inner_cls):
-                _trajectory_folder = os.getenv("TRAJECTORY_FOLDER", "./trajectories")
-
+            class Recovery(RecoveryMixin, inner_cls):
                 def __init__(self, _message_mode: str = "full", **kw):
                     super().__init__(**kw)
-                    self._message_mode = _message_mode
-                    self._replay_messages: list[dict] = []
+                    self._init_recovery(_message_mode)
 
                 @staticmethod
                 def name() -> str:
@@ -96,24 +86,14 @@ class RecoveryInstalledAgent:
 
                 async def setup(self, environment):
                     await super().setup(environment)
-                    commands, messages = find_and_parse_trajectory(
-                        self.logs_dir, self._trajectory_folder
-                    )
-                    self._replay_messages = messages
+                    commands, _ = self._parse_trajectory()
                     if commands:
                         await replay_via_exec(environment, commands)
                         logger.info(f"Replayed {len(commands)} commands from previous trajectory")
 
                 async def run(self, instruction, environment, context):
-                    model = getattr(self, "model_name", "") or ""
-                    message_context = await build_message_context(
-                        self._replay_messages, self._message_mode, model
-                    )
-                    await super().run(
-                        build_recovery_instruction(instruction, message_context),
-                        environment,
-                        context,
-                    )
+                    recovery_instruction = await self._build_recovery_instruction(instruction)
+                    await super().run(recovery_instruction, environment, context)
                     # Ensure usage.json exists for pipeline aggregation
                     save_usage(self.logs_dir, context)
 
