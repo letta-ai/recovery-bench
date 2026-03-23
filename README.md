@@ -1,13 +1,11 @@
 # Recovery-Bench
 
-Recovery-Bench is a benchmark for evaluating how well LLM agents recover from mistakes. An agent (with a weak model) attempts a terminal-based task and fails. Recovery-Bench replays the failed agent's commands to reproduce the corrupted environment, then drops a recovery agent into that state to see if it can fix the mess and complete the original task.
-
-Built on [Harbor](https://github.com/laude-institute/harbor) and [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench). Read more on our [blog post](https://www.letta.com/blog/recovery-bench).
+[Recovery-Bench]((https://www.letta.com/blog/recovery-bench)) is a benchmark for evaluating how well LLM agents recover from mistakes. A weak agent attempts a [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench) task and fails. We evaluate how well agents can recover after replaying the failed trajectory to reproduce the corrupted environment.
 
 ## How It Works
 
 ```
-Initial agent runs task → fails → trajectory saved
+Weak agent runs task → fails → trajectory saved
                                         ↓
                           Replay failed commands in fresh env
                                         ↓
@@ -16,10 +14,10 @@ Initial agent runs task → fails → trajectory saved
                           Measure: did it recover? (reward > 0)
 ```
 
-1. **Initial traces** — An agent (e.g. Haiku) runs Terminal-Bench tasks. Some succeed, some fail.
+1. **Initial traces** — An agent (with a weak model) runs Terminal-Bench tasks.
 2. **Filter failures** — Keep only trajectories where the agent failed (reward = 0).
 3. **Replay** — Re-execute the failed agent's commands in a fresh Docker container to reproduce the corrupted state.
-4. **Recovery** — A recovery agent gets the corrupted environment, context from the failed attempt, and the original task. It tries a different approach.
+4. **Recovery** — A recovery agent gets the original task, corrupted environment, and optionally context from the failed attempt.
 5. **Score** — Compare recovery success rates across models and agents.
 
 ## Setup
@@ -30,34 +28,22 @@ pip install -e .
 # Pull the bundled initial traces (requires Git LFS)
 git lfs install
 git lfs pull
-
-# API keys for the models you're testing
-export ANTHROPIC_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"
 ```
 
-Docker must be running.
+Add relevant API keys for the models you're testing.
 
 ### Shared failure set
 
-The `git lfs pull` fetches pre-generated Haiku 4.5 initial traces into `runs/`. These traces are the common baseline for all experiments — every model and agent is evaluated against the same set of failed tasks and corrupted environments, making results directly comparable across runs.
+The `git lfs pull` fetches pre-generated Haiku 4.5 (Terminus-2) initial traces into `runs/`. These traces are the common baseline for all experiments — every model and agent is evaluated against the same set of failed tasks and corrupted environments, making results directly comparable across runs.
 
-## Evaluating Models
+## Evaluating Models (using Terminus-2)
 
-Pick a model and run it against the shared failure set:
+Pick any [LiteLLM model](https://docs.litellm.ai/docs/providers) and run it against the shared Haiku 4.5 failure set using Terminus-2:
 
 ```bash
 python -m recovery_bench.generate_traces \
-    --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --recovery-model anthropic/claude-opus-4-6 \
     --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
-```
-
-That's it. This replays each failed Haiku trajectory, runs Opus as the recovery agent, and scores the results. Swap `--recovery-model` to any [LiteLLM model](https://docs.litellm.ai/docs/providers):
-
-```bash
---recovery-model openai/gpt-5.3-codex
---recovery-model google/gemini-3.1-pro
---recovery-model anthropic/claude-sonnet-4-6
 ```
 
 For model-specific kwargs (reasoning effort, temperature, etc.), pass a JSON config instead:
@@ -175,6 +161,10 @@ recovery_bench/
     terminus.py         RecoveryTerminus, BaselineTerminus
     letta_code.py       LettaCode, RecoveryLettaCode
 ```
+
+## Acknowledgements
+
+Recovery-Bench is built on [Harbor](https://github.com/laude-institute/harbor) and [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench).
 
 ## Citation
 
