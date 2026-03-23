@@ -1,170 +1,147 @@
 # Recovery-Bench
 
-Recovery-Bench is a benchmark for evaluating the capability of LLM agents to recover from mistakes. This repository provides tools to generate Recovery-Bench traces and run recovery agents on terminal-based tasks.
+[Recovery-Bench](https://www.letta.com/blog/recovery-bench) is a benchmark for evaluating how well LLM agents recover from mistakes. A weak agent attempts a [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench) task and fails. We evaluate how well agents can recover after replaying the failed trajectory to reproduce the corrupted environment.
 
-Built on [Harbor](https://github.com/laude-institute/harbor) and [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench).
+## How It Works
 
-Read more on our blog: [letta.com/blog/recovery-bench](https://www.letta.com/blog/recovery-bench)
-
-## Prerequisites
-
-1. Install dependencies:
-```bash
-pip install -e .
+```
+Weak agent runs task → fails → trajectory saved
+                                        ↓
+                          Replay failed commands in fresh env
+                                        ↓
+                          Recovery agent starts from corrupted state
+                                        ↓
+                          Measure: did it recover? (reward > 0)
 ```
 
-2. Install [Git LFS](https://git-lfs.com/) and pull the initial traces:
+1. **Initial traces** — An agent (with a weak model) runs Terminal-Bench tasks.
+2. **Filter failures** — Keep only trajectories where the agent failed (reward = 0).
+3. **Replay** — Re-execute the failed agent's commands in a fresh Docker container to reproduce the corrupted state.
+4. **Recovery** — A recovery agent gets the original task, corrupted environment, and optionally context from the failed attempt.
+5. **Score** — Compare recovery success rates across models and agents.
+
+## Setup
+
 ```bash
+pip install -e .
+
+# Pull the bundled initial traces (requires Git LFS)
 git lfs install
 git lfs pull
 ```
-This fetches the initial haiku 4.5 traces in `runs/` used for recovery experiments.
 
-3. Set up your API keys:
-```bash
-export ANTHROPIC_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"
-```
+Add API keys for the models you're testing.
 
-4. Ensure Docker is installed and running.
+### Shared failure set
 
-## Quick Start
+The `git lfs pull` fetches pre-generated Terminus-2 Haiku 4.5 initial traces into `runs/`. These traces are the common baseline for all experiments — every model and agent is evaluated against the same set of failed tasks and corrupted environments, making results directly comparable across runs.
 
-### 1. Generate Initial Traces + Run Recovery
-```bash
-python -m recovery_bench.generate_traces \
-    --initial-model anthropic/claude-haiku-4-5-20251001 \
-    --recovery-model anthropic/claude-opus-4-5-20251101 \
-    --task-id sqlite-db-truncate
-```
+## Evaluating Models (using Terminus-2)
 
-### 2. Run Recovery on Existing Traces
-```bash
-python -m recovery_bench.generate_traces \
-    --recovery-model anthropic/claude-opus-4-5-20251101 \
-    --resume-initial jobs/initial-haiku-xxx
-```
-
-## Usage
-
-Run the full pipeline (initial traces → recovery) or recovery only on existing traces:
-
-```bash
-# Full pipeline
-python -m recovery_bench.generate_traces \
-    --initial-model <model-or-config> \
-    --recovery-model <model-or-config> \
-    --task-id <task-name>
-
-# Recovery only on existing traces
-python -m recovery_bench.generate_traces \
-    --recovery-model <model-or-config> \
-    --resume-initial <path-to-initial-traces>
-
-# Using a JSON model config
-python -m recovery_bench.generate_traces \
-    --recovery-model configs/terminus/opus-46-max.json \
-    --resume-initial jobs/initial-haiku-xxx
-```
-
-Options:
-- `--initial-model`: Model name or JSON config for initial traces (required unless `--resume-initial`)
-- `--recovery-model`: Model name or JSON config for recovery (required for recovery, skips recovery if omitted)
-- `--task-id`: Specific task ID(s) to run (can be repeated)
-- `--recovery-agent`: Recovery agent name, import path, or `installed:<name>` (default: `recovery-terminus`)
-- `--initial-agent`: Initial agent import path (default: `terminus-2`)
-- `--n-concurrent`: Number of concurrent processes (default: 8)
-- `--max-iterations`: Maximum recovery iterations (default: 1)
-- `--resume-initial`: Path to existing traces (skips initial generation)
-- `--job-name`: Custom job name for recovery output
-- `--cleanup-container`: Cleanup Docker containers before running
-- `--dataset-version`: Dataset version for initial trace generation (e.g., `2.0`)
-- `--env`: Harbor sandbox backend (e.g., `docker`, `daytona`, `modal`)
-
-## Agents
-
-### Evaluating new models (no code)
-
-Use `RecoveryTerminus` (default) with different models:
+Pick any [LiteLLM model](https://docs.litellm.ai/docs/providers) and run it against the shared Haiku 4.5 failure set using Terminus-2:
 
 ```bash
 python -m recovery_bench.generate_traces \
-    --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --recovery-model anthropic/claude-opus-4-6 \
     --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
 ```
 
-### Evaluating any Harbor installed agent (no code)
-
-Wrap any Harbor installed agent with `installed:<name>`:
+For model-specific kwargs (reasoning effort, temperature, etc.), pass a JSON config instead:
 
 ```bash
-# Claude Code as recovery agent
+--recovery-model configs/terminus/sonnet-46-max.json
+```
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-6",
+  "model_kwargs": { "reasoning_effort": "max", "temperature": 1.0 }
+}
+```
+
+## Evaluating Agents
+
+By default, recovery uses `RecoveryTerminus` (a Terminus-2 agent with replay and recovery instructions). You can also swap the agent to evaluate harnesses with `installed:<name>` to wrap any Harbor (installed) agent for recovery. This dynamically creates a recovery variant that inherits the agent's full behavior and adds replay + recovery instructions:
+
+```bash
 python -m recovery_bench.generate_traces \
     --recovery-agent installed:claude-code \
     --recovery-model anthropic/claude-sonnet-4-6 \
     --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
-
-# Codex as recovery agent
-python -m recovery_bench.generate_traces \
-    --recovery-agent installed:codex \
-    --recovery-model openai/gpt-5.3-codex \
-    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
-
-# Any Harbor agent: aider, gemini-cli, goose, openhands, etc.
-python -m recovery_bench.generate_traces \
-    --recovery-agent installed:gemini-cli \
-    --recovery-model google/gemini-3.1-pro \
-    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
 ```
 
-### Terminus-2 (ATIF format)
+Works with any Harbor (installed) agent: `installed:codex`, `installed:gemini-cli`, `installed:aider`, etc.
 
-Recovery agents extend Harbor's [Terminus-2](https://github.com/laude-institute/harbor/blob/main/src/harbor/agents/terminus_2/terminus_2.py), inheriting its LLM calling (with retry and exponential backoff), context summarization, response parsing, and ATIF trajectory format.
+### Message Modes
 
-```bash
-# Recovery (default)
---recovery-agent recovery-terminus
+`--message-mode` controls the amount of context from the failed attempt provided to the recovery agent:
 
-# Variants
---recovery-agent recovery-terminus-no-messages   # Environment replay only
---recovery-agent recovery-terminus-summaries      # Summarized history
+| Mode | What the agent gets |
+|------|---------------------|
+| `full` (default) | Full transcript of the previous conversation |
+| `summary` | LLM-generated summary of what was tried and what went wrong |
+| `none` | Nothing — only the replayed environment and original task |
 
-# Baseline (fresh start, no replay)
---recovery-agent baseline-terminus
-```
+---
 
-### LettaCode (events JSONL format)
+## Advanced Usage
 
-```bash
-# Initial
---initial-agent recovery_bench.agents.letta_code:LettaCode
+### Generating your own initial traces
 
-# Recovery
---recovery-agent recovery-letta-code
-```
-
-## Example
-
-Test haiku failing, opus recovering:
+Generate fresh traces instead of using the bundled ones:
 
 ```bash
+# Initial traces only
 python -m recovery_bench.generate_traces \
     --initial-model anthropic/claude-haiku-4-5-20251001 \
-    --initial-agent recovery_bench.agents.letta_code:LettaCode \
-    --recovery-agent recovery-letta-code \
+    --task-id sqlite-db-truncate
+
+# Full pipeline: initial + recovery in one command
+python -m recovery_bench.generate_traces \
+    --initial-model anthropic/claude-haiku-4-5-20251001 \
+    --initial-agent my_module.agents:MyInitialAgent \
     --recovery-model anthropic/claude-opus-4-5-20251101 \
-    --task-id sqlite-db-truncate \
-    --max-iterations 1
+    --recovery-agent my_module.agents:MyRecoveryAgent \
+    --task-id sqlite-db-truncate
 ```
 
-## How It Works
+### Full CLI reference
 
-1. **Generate initial traces**: Run initial model on Terminal-Bench tasks
-2. **Collect failures**: Keep trajectories where the agent failed (reward=0)
-3. **Replay operations**: Re-execute failed agent's commands to corrupt environment
-4. **Test recovery**: Run recovery model starting from corrupted state
-5. **Measure**: Compare recovery success rate across models
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--initial-model` | Model for initial traces | Required unless `--resume-initial` |
+| `--initial-agent` | Registry name or import path | `terminus-2` |
+| `--recovery-model` | Model for recovery | Omit to skip recovery |
+| `--recovery-agent` | Registry name, import path, or `installed:<name>` | `recovery-terminus` |
+| `--message-mode` | `full`, `none`, or `summary` | `full` |
+| `--resume-initial` | Path to existing initial traces | — |
+| `--task-id` | Task ID (repeatable) | All tasks |
+| `--n-concurrent` | Parallel processes | `8` |
+| `--job-name` | Custom output directory name | Auto-generated |
+| `--dataset-version` | Terminal-Bench version | `2.0` |
+| `--env` | Harbor backend (`docker`, `daytona`, `modal`) | — |
+
+### Project structure
+
+```
+recovery_bench/
+  generate_traces.py    CLI entry point
+  pipeline.py           Orchestrator: initial → reorganize → recovery → aggregate
+  prompts.py            Prompt text and instruction builders
+  replay.py             Trajectory parsing and environment replay
+  utils.py              Config resolution, task hashing, usage tracking
+  agents/
+    __init__.py         Agent registry
+    base.py             RecoveryInstalledAgent (generic Harbor agent wrapper)
+    recovery_mixin.py   Shared recovery logic across all recovery agents
+    terminus.py         RecoveryTerminus, BaselineTerminus
+    letta_code.py       LettaCode, RecoveryLettaCode
+```
+
+## Acknowledgements
+
+Recovery-Bench is built on [Harbor](https://github.com/laude-institute/harbor) and [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench).
 
 ## Citation
 
-If you use Recovery-Bench in your research, please cite our blog post and the Terminal-Bench paper.
+If you use Recovery-Bench in your research, please cite our [blog post](https://www.letta.com/blog/recovery-bench) and the [Terminal-Bench paper](https://harborframework.com).
