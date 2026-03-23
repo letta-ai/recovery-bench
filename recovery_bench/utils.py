@@ -17,26 +17,30 @@ from litellm.types.utils import (
 logger = logging.getLogger(__name__)
 
 
-def resolve_model(model_str: str) -> tuple[str, dict, str | None]:
-    """Resolve a model string to (model_name, model_kwargs, letta_code_model).
+def resolve_config(model_str: str) -> tuple[str, dict]:
+    """Resolve a model string to (model_name, agent_kwargs).
 
-    Accepts either a model name (e.g. 'anthropic/claude-opus-4-5') or a path
-    to a JSON config file (e.g. 'configs/models/opus-4.6-high.json').
+    Accepts either a plain model name (e.g. 'anthropic/claude-opus-4-5') or a
+    path to a JSON config file (e.g. 'configs/letta-code/sonnet-46-max.json').
+
+    When a JSON config is provided, the ``model`` key is extracted and
+    everything else (``model_kwargs``, ``letta_code_model``, etc.) is returned
+    as ``agent_kwargs`` — an opaque dict passed through to the agent via
+    ``--agent-kwarg`` flags.
 
     Returns:
         model_name: LiteLLM model identifier (e.g. 'anthropic/claude-sonnet-4-6').
-        model_kwargs: Extra kwargs for the model (e.g. reasoning_effort).
-        letta_code_model: Letta Code model id (e.g. 'sonnet-4.6-xhigh') or None.
+        agent_kwargs: All remaining config entries to forward to the agent.
     """
     path = Path(model_str)
     if path.suffix == ".json" and path.exists():
         with open(path) as f:
             config = json.load(f)
-        model_name = config.get("model")
+        model_name = config.pop("model", None)
         if not model_name:
-            raise ValueError(f"Model config {model_str} missing 'model' key")
-        return model_name, config.get("model_kwargs", {}), config.get("letta_code_model")
-    return model_str, {}, None
+            raise ValueError(f"Config {model_str} missing 'model' key")
+        return model_name, config
+    return model_str, {}
 
 
 def shorten_model_name(model: str) -> str:

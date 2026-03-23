@@ -63,7 +63,7 @@ python -m recovery_bench.generate_traces \
 
 # Using a JSON model config
 python -m recovery_bench.generate_traces \
-    --recovery-model configs/models/opus-4.6-high.json \
+    --recovery-model configs/terminus/opus-46-max.json \
     --resume-initial jobs/initial-haiku-xxx
 ```
 
