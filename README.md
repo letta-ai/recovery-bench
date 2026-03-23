@@ -1,6 +1,6 @@
 # Recovery-Bench
 
-[Recovery-Bench]((https://www.letta.com/blog/recovery-bench)) is a benchmark for evaluating how well LLM agents recover from mistakes. A weak agent attempts a [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench) task and fails. We evaluate how well agents can recover after replaying the failed trajectory to reproduce the corrupted environment.
+[Recovery-Bench](https://www.letta.com/blog/recovery-bench) is a benchmark for evaluating how well LLM agents recover from mistakes. A weak agent attempts a [Terminal-Bench 2.0](https://harborframework.com/docs/running-tbench) task and fails. We evaluate how well agents can recover after replaying the failed trajectory to reproduce the corrupted environment.
 
 ## How It Works
 
@@ -30,11 +30,11 @@ git lfs install
 git lfs pull
 ```
 
-Add relevant API keys for the models you're testing.
+Add API keys for the models you're testing.
 
 ### Shared failure set
 
-The `git lfs pull` fetches pre-generated Haiku 4.5 (Terminus-2) initial traces into `runs/`. These traces are the common baseline for all experiments — every model and agent is evaluated against the same set of failed tasks and corrupted environments, making results directly comparable across runs.
+The `git lfs pull` fetches pre-generated Terminus-2 Haiku 4.5 initial traces into `runs/`. These traces are the common baseline for all experiments — every model and agent is evaluated against the same set of failed tasks and corrupted environments, making results directly comparable across runs.
 
 ## Evaluating Models (using Terminus-2)
 
@@ -59,38 +59,9 @@ For model-specific kwargs (reasoning effort, temperature, etc.), pass a JSON con
 }
 ```
 
-### Message modes
-
-`--message-mode` controls how much of the failed attempt the recovery agent sees:
-
-| Mode | What the agent gets |
-|------|---------------------|
-| `full` (default) | Full transcript of the previous conversation |
-| `none` | Nothing — only the replayed environment and original task |
-| `summary` | LLM-generated summary of what was tried and what went wrong |
-
 ## Evaluating Agents
 
-By default, recovery uses `RecoveryTerminus` (a Terminus-2 agent with replay and recovery instructions). You can swap the agent independently of the model.
-
-### Built-in recovery agents
-
-| Name | Description |
-|------|-------------|
-| `recovery-terminus` | Default. Terminus-2 + replay + recovery instruction |
-| `recovery-letta-code` | LettaCode recovery agent |
-| `baseline-terminus` | Fresh start, no replay (baseline comparison) |
-
-```bash
-python -m recovery_bench.generate_traces \
-    --recovery-agent recovery-letta-code \
-    --recovery-model anthropic/claude-sonnet-4-6 \
-    --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
-```
-
-### Any Harbor-installed agent
-
-Use `installed:<name>` to wrap any Harbor agent for recovery. This dynamically creates a recovery variant that inherits the agent's full behavior and adds replay + recovery instructions:
+By default, recovery uses `RecoveryTerminus` (a Terminus-2 agent with replay and recovery instructions). You can also swap the agent to evaluate harnesses with `installed:<name>` to wrap any Harbor (installed) agent for recovery. This dynamically creates a recovery variant that inherits the agent's full behavior and adds replay + recovery instructions:
 
 ```bash
 python -m recovery_bench.generate_traces \
@@ -99,7 +70,17 @@ python -m recovery_bench.generate_traces \
     --resume-initial runs/initial-claude-haiku-4-5-20251001-20260303_194859
 ```
 
-Works with any Harbor agent: `installed:codex`, `installed:gemini-cli`, `installed:aider`, etc.
+Works with any Harbor (installed) agent: `installed:codex`, `installed:gemini-cli`, `installed:aider`, etc.
+
+### Message Modes
+
+`--message-mode` controls the amount of context from the failed attempt provided to the recovery agent:
+
+| Mode | What the agent gets |
+|------|---------------------|
+| `full` (default) | Full transcript of the previous conversation |
+| `summary` | LLM-generated summary of what was tried and what went wrong |
+| `none` | Nothing — only the replayed environment and original task |
 
 ---
 
@@ -107,7 +88,7 @@ Works with any Harbor agent: `installed:codex`, `installed:gemini-cli`, `install
 
 ### Generating your own initial traces
 
-Instead of using the bundled traces, generate fresh ones:
+Generate fresh traces instead of using the bundled ones:
 
 ```bash
 # Initial traces only
@@ -118,15 +99,10 @@ python -m recovery_bench.generate_traces \
 # Full pipeline: initial + recovery in one command
 python -m recovery_bench.generate_traces \
     --initial-model anthropic/claude-haiku-4-5-20251001 \
+    --initial-agent my_module.agents:MyInitialAgent \
     --recovery-model anthropic/claude-opus-4-5-20251101 \
+    --recovery-agent my_module.agents:MyRecoveryAgent \
     --task-id sqlite-db-truncate
-```
-
-### Custom agents via import path
-
-```bash
---recovery-agent my_module.agents:MyRecoveryAgent
---initial-agent my_module.agents:MyInitialAgent
 ```
 
 ### Full CLI reference
@@ -134,12 +110,12 @@ python -m recovery_bench.generate_traces \
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--initial-model` | Model for initial traces | Required unless `--resume-initial` |
+| `--initial-agent` | Registry name or import path | `terminus-2` |
 | `--recovery-model` | Model for recovery | Omit to skip recovery |
+| `--recovery-agent` | Registry name, import path, or `installed:<name>` | `recovery-terminus` |
+| `--message-mode` | `full`, `none`, or `summary` | `full` |
 | `--resume-initial` | Path to existing initial traces | — |
 | `--task-id` | Task ID (repeatable) | All tasks |
-| `--recovery-agent` | Registry name, import path, or `installed:<name>` | `recovery-terminus` |
-| `--initial-agent` | Registry name or import path | `terminus-2` |
-| `--message-mode` | `full`, `none`, or `summary` | `full` |
 | `--n-concurrent` | Parallel processes | `8` |
 | `--job-name` | Custom output directory name | Auto-generated |
 | `--dataset-version` | Terminal-Bench version | `2.0` |
