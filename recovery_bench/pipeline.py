@@ -28,6 +28,18 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+# Tasks excluded from recovery due to infrastructure limits.
+# - 4 tasks exceed Modal's 64 KB exec limit / Linux MAX_ARG_STRLEN when
+#   the recovery instruction is passed as a CLI argument.
+# - qemu-alpine-ssh always hits a setup timeout during trajectory replay.
+EXCLUDED_RECOVERY_TASKS = {
+    "custom-memory-heap-crash",  # 417 steps, 133 KB context
+    "fix-ocaml-gc",              # 860 steps (haiku thrashing), 156 KB context
+    "polyglot-c-py",             # 40 steps but verbose output, 65 KB context
+    "polyglot-rust-c",           # 59 steps but verbose output, 99 KB context
+    "qemu-alpine-ssh",           # setup timeout during replay (every agent)
+}
+
 # Import path for the generic recovery wrapper
 _RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
 
@@ -246,6 +258,8 @@ def run_recovery(
 
     if task_ids is None:
         task_ids = get_unsolved_tasks(traces_folder)
+
+    task_ids = [t for t in task_ids if t not in EXCLUDED_RECOVERY_TASKS]
 
     if not task_ids:
         logger.info("No unsolved tasks found, skipping recovery.")
