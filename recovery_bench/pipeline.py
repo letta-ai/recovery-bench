@@ -259,14 +259,7 @@ def run_recovery(
     if task_ids is None:
         task_ids = get_unsolved_tasks(traces_folder)
 
-    # Skip tasks that can't be recovered reliably (oversized trajectories,
-    # setup timeouts).  Excluded for ALL agents for apples-to-apples comparison.
-    skipped = [t for t in task_ids if t in EXCLUDED_RECOVERY_TASKS]
-    if skipped:
-        logger.warning(
-            f"Skipping {len(skipped)} excluded task(s): {', '.join(skipped)}"
-        )
-        task_ids = [t for t in task_ids if t not in EXCLUDED_RECOVERY_TASKS]
+    task_ids = [t for t in task_ids if t not in EXCLUDED_RECOVERY_TASKS]
 
     if not task_ids:
         logger.info("No unsolved tasks found, skipping recovery.")
