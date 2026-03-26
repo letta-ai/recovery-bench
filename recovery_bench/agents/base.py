@@ -7,8 +7,6 @@ inherited automatically — no manual delegation required.
 """
 
 import logging
-import tempfile
-from pathlib import Path
 
 from harbor.agents.factory import AgentFactory
 from harbor.models.agent.name import AgentName
@@ -93,43 +91,10 @@ class RecoveryInstalledAgent:
                         await replay_via_exec(environment, commands)
                         logger.info(f"Replayed {len(commands)} commands from previous trajectory")
 
-                def create_run_agent_commands(self, instruction):
-                    # Build commands with a short placeholder, then rewrite
-                    # to pipe the instruction via stdin instead of as a
-                    # positional arg (avoids Linux MAX_ARG_STRLEN of 128 KB).
-                    _PH = "__RECOVERY_BENCH_INSTRUCTION__"
-                    cmds = inner_cls.create_run_agent_commands(self, _PH)
-                    for cmd in cmds:
-                        if _PH not in cmd.command:
-                            continue
-                        # Remove the positional instruction argument
-                        cmd.command = cmd.command.replace(f"-- {_PH}", "")
-                        cmd.command = cmd.command.replace(_PH, "")
-                        # Redirect stdin from the instruction file instead of /dev/null
-                        for devnull in ("</dev/null", "< /dev/null"):
-                            cmd.command = cmd.command.replace(devnull, f"< {self._instruction_file}")
-                        # Fallback: if the agent doesn't redirect from /dev/null, pipe via cat
-                        if self._instruction_file not in cmd.command:
-                            cmd.command = f"cat {self._instruction_file} | {cmd.command}"
-                    return cmds
-
                 async def run(self, instruction, environment, context):
                     recovery_instruction = await self._build_recovery_instruction(instruction)
-
-                    # Upload instruction to the container as a file;
-                    # create_run_agent_commands will redirect stdin from it.
-                    self._instruction_file = "/installed-agent/recovery-instruction.txt"
-                    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-                        f.write(recovery_instruction)
-                        local_path = f.name
-                    try:
-                        await environment.upload_file(local_path, self._instruction_file)
-                    finally:
-                        Path(local_path).unlink(missing_ok=True)
-
-                    # create_run_agent_commands ignores the instruction arg
-                    # (uses a placeholder), so pass the original short one.
-                    await super().run(instruction, environment, context)
+                    await super().run(recovery_instruction, environment, context)
+                    # Ensure usage.json exists for pipeline aggregation
                     save_usage(self.logs_dir, context)
 
             Recovery.__name__ = f"Recovery{inner_cls.__name__}"

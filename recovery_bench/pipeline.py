@@ -28,6 +28,16 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+# Tasks whose initial trajectories produce recovery instructions exceeding
+# Modal's 64 KB exec limit / Linux MAX_ARG_STRLEN (128 KB) when passed as
+# a CLI argument.  Excluded automatically for installed agents.
+OVERSIZED_TRAJECTORY_TASKS = {
+    "custom-memory-heap-crash",  # 417 steps, 133 KB context
+    "fix-ocaml-gc",              # 860 steps (haiku thrashing), 156 KB context
+    "polyglot-c-py",             # 40 steps but verbose output, 65 KB context
+    "polyglot-rust-c",           # 59 steps but verbose output, 99 KB context
+}
+
 # Import path for the generic recovery wrapper
 _RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
 
@@ -246,6 +256,18 @@ def run_recovery(
 
     if task_ids is None:
         task_ids = get_unsolved_tasks(traces_folder)
+
+    # Installed agents pass the recovery instruction as a CLI argument,
+    # which is subject to Modal's 64 KB exec limit.  Skip tasks whose
+    # trajectories produce oversized instructions.
+    if agent.startswith("installed:"):
+        skipped = [t for t in task_ids if t in OVERSIZED_TRAJECTORY_TASKS]
+        if skipped:
+            logger.warning(
+                f"Skipping {len(skipped)} task(s) with oversized trajectories "
+                f"for installed agent: {', '.join(skipped)}"
+            )
+            task_ids = [t for t in task_ids if t not in OVERSIZED_TRAJECTORY_TASKS]
 
     if not task_ids:
         logger.info("No unsolved tasks found, skipping recovery.")
