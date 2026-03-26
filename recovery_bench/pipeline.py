@@ -28,14 +28,16 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
-# Tasks whose initial trajectories produce recovery instructions exceeding
-# Modal's 64 KB exec limit / Linux MAX_ARG_STRLEN (128 KB) when passed as
-# a CLI argument.  Excluded automatically for installed agents.
-OVERSIZED_TRAJECTORY_TASKS = {
+# Tasks excluded for installed agents due to infrastructure limits.
+# - 4 tasks exceed Modal's 64 KB exec limit / Linux MAX_ARG_STRLEN when
+#   the recovery instruction is passed as a CLI argument.
+# - qemu-alpine-ssh always hits a setup timeout during trajectory replay.
+INSTALLED_AGENT_EXCLUDED_TASKS = {
     "custom-memory-heap-crash",  # 417 steps, 133 KB context
     "fix-ocaml-gc",              # 860 steps (haiku thrashing), 156 KB context
     "polyglot-c-py",             # 40 steps but verbose output, 65 KB context
     "polyglot-rust-c",           # 59 steps but verbose output, 99 KB context
+    "qemu-alpine-ssh",           # setup timeout during replay (every agent)
 }
 
 # Import path for the generic recovery wrapper
@@ -261,13 +263,13 @@ def run_recovery(
     # which is subject to Modal's 64 KB exec limit.  Skip tasks whose
     # trajectories produce oversized instructions.
     if agent.startswith("installed:"):
-        skipped = [t for t in task_ids if t in OVERSIZED_TRAJECTORY_TASKS]
+        skipped = [t for t in task_ids if t in INSTALLED_AGENT_EXCLUDED_TASKS]
         if skipped:
             logger.warning(
-                f"Skipping {len(skipped)} task(s) with oversized trajectories "
-                f"for installed agent: {', '.join(skipped)}"
+                f"Skipping {len(skipped)} task(s) for installed agent: "
+                f"{', '.join(skipped)}"
             )
-            task_ids = [t for t in task_ids if t not in OVERSIZED_TRAJECTORY_TASKS]
+            task_ids = [t for t in task_ids if t not in INSTALLED_AGENT_EXCLUDED_TASKS]
 
     if not task_ids:
         logger.info("No unsolved tasks found, skipping recovery.")
