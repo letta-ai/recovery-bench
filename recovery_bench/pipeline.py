@@ -31,8 +31,10 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
-# Modal's exec limit for CLI arguments (bytes).
-MAX_INSTRUCTION_BYTES = 65_536
+# Size limit for recovery instructions (bytes).  Modal's exec limit is
+# 65 536 bytes; we use 64 000 to leave headroom for the original task
+# instruction text which isn't included in the estimate.
+MAX_INSTRUCTION_BYTES = 64_000
 
 # Tasks excluded from recovery for non-size reasons.
 ALWAYS_EXCLUDED_TASKS = {
