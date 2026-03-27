@@ -66,9 +66,6 @@ def format_messages_as_text(messages: list[dict]) -> str:
     for msg in messages:
         role = msg.get("role", "unknown").upper()
         content = msg.get("content", "")
-        # Truncate very long messages to keep instruction manageable
-        if len(content) > 2000:
-            content = content[:2000] + "\n... [truncated]"
         lines.append(f"[{role}]: {content}")
     return "\n\n".join(lines)
 
