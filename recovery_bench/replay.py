@@ -164,27 +164,72 @@ def find_and_parse_trajectory(
 # ---------------------------------------------------------------------------
 
 
+def _find_interrupted_commands(commands: list[ReplayCommand]) -> set[int]:
+    """Return indices of commands immediately followed by an interrupt signal.
+
+    When the original agent sent C-c (or another control sequence) right after
+    a command, it means the agent intentionally killed that command.  There is
+    no point replaying it during recovery — it would just hang.
+    """
+    skip: set[int] = set()
+    for i in range(len(commands) - 1):
+        next_ks = commands[i + 1].keystrokes.strip()
+        if next_ks.startswith("C-") and commands[i].command:
+            skip.add(i)
+    return skip
+
+
 async def replay_via_exec(
     environment: BaseEnvironment,
     commands: list[ReplayCommand],
-    timeout_sec: int = 60,
+    timeout_sec: int = 15,
 ) -> None:
-    """Replay commands using environment.exec() — for installed agents."""
+    """Replay commands using environment.exec() — for installed agents.
+
+    Uses ``asyncio.wait_for`` as a safety net because some environment
+    backends (e.g. Modal) do not reliably enforce ``timeout_sec``.
+    Commands that were followed by an interrupt signal (C-c) in the
+    original trajectory are skipped entirely.
+    """
+    skip_indices = _find_interrupted_commands(commands)
+    if skip_indices:
+        logger.info(f"Skipping {len(skip_indices)} commands followed by interrupt signals")
+
     replayed = 0
-    for cmd in commands:
+    skipped_interrupt = 0
+    timed_out = 0
+    total_executable = 0
+
+    for i, cmd in enumerate(commands):
         if not cmd.command:
             continue
+        total_executable += 1
+        if i in skip_indices:
+            skipped_interrupt += 1
+            continue
         try:
-            await environment.exec(
-                f"bash -lc {shlex.quote(cmd.command)}",
-                timeout_sec=timeout_sec,
+            await asyncio.wait_for(
+                environment.exec(
+                    f"bash -lc {shlex.quote(cmd.command)}",
+                    timeout_sec=timeout_sec,
+                ),
+                timeout=timeout_sec,
             )
             replayed += 1
+        except (asyncio.TimeoutError, TimeoutError):
+            timed_out += 1
+            logger.warning(
+                f"Replay command timed out after {timeout_sec}s, skipping: {cmd.command[:80]}"
+            )
+            continue
         except Exception as e:
             logger.error(f"Replay error: {e}")
             continue
 
-    logger.info(f"Replayed {replayed}/{len(commands)} commands via exec")
+    logger.info(
+        f"Replay complete: {replayed}/{total_executable} succeeded, "
+        f"{skipped_interrupt} skipped (interrupted), {timed_out} timed out"
+    )
 
 
 async def replay_via_tmux(

@@ -41,6 +41,12 @@ ALWAYS_EXCLUDED_TASKS = {
     "qemu-alpine-ssh",  # setup timeout during trajectory replay (every agent)
 }
 
+# Multiplier for harbor's agent setup timeout during recovery runs.
+# Recovery setup replays the initial trajectory's commands, which can be slow
+# for tasks with many commands.  The default harbor timeout (360s) is too tight;
+# 3x (1080s) gives enough headroom.
+RECOVERY_SETUP_TIMEOUT_MULTIPLIER = 3.0
+
 # Import path for the generic recovery wrapper
 _RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
 
@@ -87,8 +93,7 @@ def filter_oversized_tasks(
         size = _estimate_recovery_size(task_id, traces_folder)
         if size > max_bytes:
             logger.warning(
-                f"Excluding {task_id}: recovery instruction is {size:,} bytes "
-                f"(limit {max_bytes:,})"
+                f"Excluding {task_id}: recovery instruction is {size:,} bytes (limit {max_bytes:,})"
             )
         else:
             kept.append(task_id)
@@ -138,6 +143,7 @@ def _build_harbor_cmd(
     agent_kwargs: dict | None = None,
     harbor_env: str | None = None,
     message_mode: str | None = None,
+    agent_setup_timeout_multiplier: float | None = None,
 ) -> list[str]:
     """Build the ``harbor run`` command list.
 
@@ -174,6 +180,9 @@ def _build_harbor_cmd(
     for key, value in all_kwargs.items():
         serialized = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
         cmd.extend(["--agent-kwarg", f"{key}={serialized}"])
+
+    if agent_setup_timeout_multiplier is not None:
+        cmd.extend(["--agent-setup-timeout-multiplier", str(agent_setup_timeout_multiplier)])
 
     return cmd
 
@@ -236,6 +245,7 @@ def generate_recovery_traces(
     harbor_env: str | None = None,
     dataset_version: str = "2.0",
     message_mode: str | None = None,
+    agent_setup_timeout_multiplier: float | None = None,
 ) -> int:
     """Run recovery agent on initial traces using harbor.
 
@@ -250,6 +260,7 @@ def generate_recovery_traces(
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
         dataset_version: Terminal-Bench dataset version.
         message_mode: Message mode for recovery agent (full/none/summary).
+        agent_setup_timeout_multiplier: Multiplier for harbor's agent setup timeout.
 
     Returns:
         Exit code from harbor run.
@@ -267,6 +278,7 @@ def generate_recovery_traces(
         agent_kwargs=agent_kwargs,
         harbor_env=harbor_env,
         message_mode=message_mode,
+        agent_setup_timeout_multiplier=agent_setup_timeout_multiplier,
     )
 
     result = run_command(cmd, env=env)
@@ -330,6 +342,7 @@ def run_recovery(
         harbor_env=harbor_env,
         dataset_version=dataset_version,
         message_mode=message_mode,
+        agent_setup_timeout_multiplier=RECOVERY_SETUP_TIMEOUT_MULTIPLIER,
     )
 
     # Aggregate usage
