@@ -102,7 +102,6 @@ def main():
         default="full",
         help="How recovery agents use messages from previous trajectory (default: full)",
     )
-
     args = parser.parse_args()
 
     # Validate flags
