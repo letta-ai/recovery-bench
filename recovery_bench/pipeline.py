@@ -36,15 +36,6 @@ logger = logging.getLogger(__name__)
 # instruction text which isn't included in the estimate.
 MAX_INSTRUCTION_BYTES = 64_000
 
-# Tasks excluded from recovery for non-size reasons.
-ALWAYS_EXCLUDED_TASKS = {
-    "qemu-alpine-ssh",  # setup timeout during trajectory replay (every agent)
-}
-
-# Multiplier for harbor's agent setup timeout during recovery runs.
-# Recovery setup replays the initial trajectory's commands, which can be slow
-# for tasks with many commands.  The default harbor timeout (360s) is too tight;
-# 3x (1080s) gives enough headroom.
 RECOVERY_SETUP_TIMEOUT_MULTIPLIER = 3.0
 
 # Import path for the generic recovery wrapper
@@ -322,7 +313,6 @@ def run_recovery(
     if task_ids is None:
         task_ids = get_unsolved_tasks(traces_folder)
 
-    task_ids = [t for t in task_ids if t not in ALWAYS_EXCLUDED_TASKS]
     task_ids = filter_oversized_tasks(task_ids, traces_folder)
 
     if not task_ids:
