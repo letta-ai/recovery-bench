@@ -206,21 +206,20 @@ def get_task_name(logs_dir: str | Path | None) -> str | None:
     return task_dir_name
 
 
-def find_trajectory_folder(logs_dir: str | Path | None, base_folder: str | Path) -> Path | None:
-    """Find the trajectory folder for a task by matching task name against hash-prefixed dirs.
+def find_trajectory_by_name(task_name: str, base_folder: str | Path) -> Path | None:
+    """Find the trajectory folder for a task name in a traces directory.
+
+    Scans ``base_folder`` for directories matching ``<hash>-<task-name>__<suffix>``
+    or ``<task-name>__<suffix>`` and returns the first one containing a
+    ``trajectory.json``.
 
     Args:
-        logs_dir: Agent logs directory (used to derive the task name).
+        task_name: Plain task name (e.g. ``"path-tracing"``).
         base_folder: Root directory containing trajectory folders.
 
     Returns:
         Path to the matching trajectory folder, or None if not found.
     """
-    task_name = get_task_name(logs_dir)
-    if not task_name:
-        logger.warning("Could not extract task name from logs_dir")
-        return None
-
     base_path = Path(base_folder)
     if not base_path.exists():
         logger.warning(f"Trajectory folder not found: {base_path}")
@@ -248,6 +247,26 @@ def find_trajectory_folder(logs_dir: str | Path | None, base_folder: str | Path)
 
     logger.warning(f"No trajectory found for task {task_name} in {base_path}")
     return None
+
+
+def find_trajectory_folder(logs_dir: str | Path | None, base_folder: str | Path) -> Path | None:
+    """Find the trajectory folder for a task by matching task name against hash-prefixed dirs.
+
+    Convenience wrapper around :func:`find_trajectory_by_name` that extracts
+    the task name from an agent logs directory path.
+
+    Args:
+        logs_dir: Agent logs directory (used to derive the task name).
+        base_folder: Root directory containing trajectory folders.
+
+    Returns:
+        Path to the matching trajectory folder, or None if not found.
+    """
+    task_name = get_task_name(logs_dir)
+    if not task_name:
+        logger.warning("Could not extract task name from logs_dir")
+        return None
+    return find_trajectory_by_name(task_name, base_folder)
 
 
 def get_agent_name(agent_import_path: str) -> str:

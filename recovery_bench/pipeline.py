@@ -16,8 +16,11 @@ from datetime import datetime
 from pathlib import Path
 
 from .agents import AGENT_REGISTRY
+from .prompts import build_recovery_instruction, format_messages_as_text
+from .replay import extract_messages
 from .utils import (
     aggregate_usage,
+    find_trajectory_by_name,
     get_agent_name,
     get_unsolved_tasks,
     reorganize_directories,
@@ -28,20 +31,68 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
-# Tasks excluded from recovery due to infrastructure limits.
-# - 4 tasks exceed Modal's 64 KB exec limit / Linux MAX_ARG_STRLEN when
-#   the recovery instruction is passed as a CLI argument.
-# - qemu-alpine-ssh always hits a setup timeout during trajectory replay.
-EXCLUDED_RECOVERY_TASKS = {
-    "custom-memory-heap-crash",  # 417 steps, 133 KB context
-    "fix-ocaml-gc",              # 860 steps (haiku thrashing), 156 KB context
-    "polyglot-c-py",             # 40 steps but verbose output, 65 KB context
-    "polyglot-rust-c",           # 59 steps but verbose output, 99 KB context
-    "qemu-alpine-ssh",           # setup timeout during replay (every agent)
+# Size limit for recovery instructions (bytes).  Modal's exec limit is
+# 65 536 bytes; we use 64 000 to leave headroom for the original task
+# instruction text which isn't included in the estimate.
+MAX_INSTRUCTION_BYTES = 64_000
+
+# Tasks excluded from recovery for non-size reasons.
+ALWAYS_EXCLUDED_TASKS = {
+    "qemu-alpine-ssh",  # setup timeout during trajectory replay (every agent)
 }
 
 # Import path for the generic recovery wrapper
 _RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
+
+
+def _estimate_recovery_size(task_name: str, traces_folder: str) -> int:
+    """Estimate the byte length of the recovery instruction for a task.
+
+    Loads the previous trajectory messages, formats them as full text,
+    wraps them in the recovery instruction template, and returns the
+    encoded byte length.
+
+    Returns 0 if the trajectory cannot be found (task won't be excluded).
+    """
+    folder = find_trajectory_by_name(task_name, traces_folder)
+    if folder is None:
+        return 0
+    messages = extract_messages(folder)
+    if not messages:
+        return 0
+    message_context = format_messages_as_text(messages)
+    # Use a placeholder instruction — the original task text is small relative
+    # to the message context, so this gives a close-enough estimate.
+    instruction = build_recovery_instruction("(task instruction)", message_context)
+    return len(instruction.encode("utf-8"))
+
+
+def filter_oversized_tasks(
+    task_ids: list[str],
+    traces_folder: str,
+    max_bytes: int = MAX_INSTRUCTION_BYTES,
+) -> list[str]:
+    """Filter out tasks whose recovery instruction would exceed *max_bytes*.
+
+    Args:
+        task_ids: Candidate task IDs.
+        traces_folder: Path to initial traces (used to look up trajectories).
+        max_bytes: Maximum allowed instruction size in bytes.
+
+    Returns:
+        Filtered list of task IDs that fit within the limit.
+    """
+    kept: list[str] = []
+    for task_id in task_ids:
+        size = _estimate_recovery_size(task_id, traces_folder)
+        if size > max_bytes:
+            logger.warning(
+                f"Excluding {task_id}: recovery instruction is {size:,} bytes "
+                f"(limit {max_bytes:,})"
+            )
+        else:
+            kept.append(task_id)
+    return kept
 
 
 def resolve_agent(agent_str: str) -> tuple[str, bool, dict[str, str]]:
@@ -259,7 +310,8 @@ def run_recovery(
     if task_ids is None:
         task_ids = get_unsolved_tasks(traces_folder)
 
-    task_ids = [t for t in task_ids if t not in EXCLUDED_RECOVERY_TASKS]
+    task_ids = [t for t in task_ids if t not in ALWAYS_EXCLUDED_TASKS]
+    task_ids = filter_oversized_tasks(task_ids, traces_folder)
 
     if not task_ids:
         logger.info("No unsolved tasks found, skipping recovery.")
