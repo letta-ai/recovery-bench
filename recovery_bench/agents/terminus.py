@@ -63,11 +63,11 @@ class RecoveryTerminus(RecoveryMixin, Terminus2):
             logger.info("No commands found in trajectory, starting fresh")
             self._last_replay_output = ""
 
-    def _populate_context(self, context: AgentContext, actual_episodes: int) -> None:
+    def _populate_context(self, context: AgentContext) -> None:
         """Populate *context* with metrics, dump trajectory, and save usage.
 
         This mirrors the ``finally`` block in ``Terminus2.run()`` — keep in
-        sync when upgrading the harbor dependency.
+        sync when upgrading the harbor dependency.  Last synced: harbor 0.4.0.
         """
         context.rollout_details = self._chat.rollout_details + self._subagent_rollout_details
         context.n_input_tokens = (
@@ -82,7 +82,7 @@ class RecoveryTerminus(RecoveryMixin, Terminus2):
         total_cost = self._chat.total_cost + self._subagent_metrics.total_cost_usd
         context.cost_usd = total_cost if total_cost > 0 else None
         context.metadata = {
-            "n_episodes": actual_episodes,
+            "n_episodes": self._n_episodes,
             "api_request_times_msec": self._api_request_times,
             "summarization_count": self._summarization_count,
         }
@@ -123,16 +123,15 @@ class RecoveryTerminus(RecoveryMixin, Terminus2):
             )
         )
 
-        actual_episodes = self._n_episodes
         try:
-            actual_episodes = await self._run_agent_loop(
+            await self._run_agent_loop(
                 initial_prompt=initial_prompt,
                 chat=self._chat,
                 logging_dir=self.logs_dir,
                 original_instruction=instruction,
             )
         finally:
-            self._populate_context(context, actual_episodes)
+            self._populate_context(context)
 
 
 class BaselineTerminus(Terminus2):
