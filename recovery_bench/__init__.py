@@ -3,7 +3,9 @@
 from recovery_bench.agents import (
     BaselineTerminus,
     LettaCode,
-    RecoveryInstalledAgent,
+    RecoveryClaudeCode,
+    RecoveryCodex,
+    RecoveryGeminiCli,
     RecoveryLettaCode,
     RecoveryTerminus,
 )
@@ -11,7 +13,9 @@ from recovery_bench.agents import (
 __all__ = [
     "BaselineTerminus",
     "LettaCode",
-    "RecoveryInstalledAgent",
+    "RecoveryClaudeCode",
+    "RecoveryCodex",
+    "RecoveryGeminiCli",
     "RecoveryLettaCode",
     "RecoveryTerminus",
 ]

@@ -38,9 +38,6 @@ MAX_INSTRUCTION_BYTES = 64_000
 
 RECOVERY_SETUP_TIMEOUT_MULTIPLIER = 3.0
 
-# Import path for the generic recovery wrapper
-_RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
-
 
 def _estimate_recovery_size(task_name: str, traces_folder: str) -> int:
     """Estimate the byte length of the recovery instruction for a task.
@@ -91,39 +88,6 @@ def filter_oversized_tasks(
     return kept
 
 
-def resolve_agent(agent_str: str) -> tuple[str, bool, dict[str, str]]:
-    """Resolve an agent string to (agent_ref, is_import_path, extra_agent_kwargs).
-
-    Handles four formats:
-    1. Import path (contains ':'): pass through as --agent-import-path
-    2. Registry name (in AGENT_REGISTRY): look up import path
-    3. 'installed:<name>': route to RecoveryInstalledAgent with wrapped_agent kwarg
-    4. Plain Harbor agent name (e.g. 'terminus-2'): pass through as --agent
-
-    Returns:
-        (agent_ref, is_import_path, extra_kwargs)
-        - agent_ref: import path or harbor agent name
-        - is_import_path: True if agent_ref should be passed via --agent-import-path,
-          False if it should be passed via --agent
-        - extra_kwargs: additional --agent-kwarg flags to pass to harbor run
-    """
-    # Case 3: installed:<name>
-    if agent_str.startswith("installed:"):
-        harbor_agent_name = agent_str.split(":", 1)[1]
-        return _RECOVERY_INSTALLED_AGENT, True, {"wrapped_agent": harbor_agent_name}
-
-    # Case 2: registry name
-    if agent_str in AGENT_REGISTRY:
-        return AGENT_REGISTRY[agent_str], True, {}
-
-    # Case 1: import path (contains ':')
-    if ":" in agent_str:
-        return agent_str, True, {}
-
-    # Case 4: plain Harbor agent name (e.g. 'terminus-2')
-    return agent_str, False, {}
-
-
 def _build_harbor_cmd(
     model: str,
     n_concurrent: int,
@@ -143,16 +107,12 @@ def _build_harbor_cmd(
     """
     cmd = ["harbor", "run", "--dataset", f"terminal-bench@{dataset_version}"]
 
-    # Resolve agent → import path or Harbor name
-    extra_kwargs: dict[str, str] = {}
-    if agent:
-        agent_ref, is_import_path, extra_kwargs = resolve_agent(agent)
-        if is_import_path:
-            cmd.extend(["--agent-import-path", agent_ref])
-        else:
-            cmd.extend(["--agent", agent_ref])
+    # Registry names (e.g. "recovery-terminus") resolve to import paths;
+    # everything else is a plain Harbor agent name (e.g. "terminus-2").
+    if agent and agent in AGENT_REGISTRY:
+        cmd.extend(["--agent-import-path", AGENT_REGISTRY[agent]])
     else:
-        cmd.extend(["--agent", "terminus-2"])
+        cmd.extend(["--agent", agent or "terminus-2"])
 
     cmd.extend(["--model", model, "--n-concurrent", str(n_concurrent)])
 
@@ -165,7 +125,7 @@ def _build_harbor_cmd(
             cmd.extend(["--include-task-name", task_id])
 
     # Append --agent-kwarg flags
-    all_kwargs = {**(agent_kwargs or {}), **(extra_kwargs or {})}
+    all_kwargs = dict(agent_kwargs or {})
     if message_mode:
         all_kwargs["message_mode"] = message_mode
     for key, value in all_kwargs.items():
@@ -196,7 +156,7 @@ def generate_initial_traces(
         dataset_version: Terminal-Bench dataset version.
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to run. None = all tasks.
-        agent: Agent name, registry name, or import path. None = terminus-2.
+        agent: Registry name or Harbor agent name. None = terminus-2.
         agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
 
@@ -245,7 +205,7 @@ def generate_recovery_traces(
         model: Model name for the recovery agent.
         task_ids: Task IDs to run recovery on.
         job_name: Job name for output directory.
-        agent: Recovery agent name, import path, or installed:<name>.
+        agent: Recovery agent registry name (e.g. ``recovery-terminus``).
         n_concurrent: Number of concurrent processes.
         agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
@@ -295,7 +255,7 @@ def run_recovery(
         traces_folder: Path to initial traces directory.
         model: Model name for the recovery agent.
         job_name: Job name for output directory.
-        agent: Recovery agent name, import path, or installed:<name>.
+        agent: Recovery agent registry name (e.g. ``recovery-terminus``).
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
         agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
@@ -374,8 +334,8 @@ def run_pipeline(
         recovery_model: Model name or JSON config path for recovery.
             None = skip recovery.
         resume_initial: Path to existing initial traces (skips generation).
-        initial_agent: Agent name or import path for initial traces.
-        recovery_agent: Recovery agent name, import path, or installed:<name>.
+        initial_agent: Registry name or Harbor agent name for initial traces.
+        recovery_agent: Recovery agent registry name (e.g. ``recovery-terminus``).
         task_ids: Specific task IDs to run.
         n_concurrent: Number of concurrent processes.
         dataset_version: Terminal-Bench dataset version.

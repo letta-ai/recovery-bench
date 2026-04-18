@@ -71,17 +71,13 @@ def main():
         "--initial-agent",
         type=str,
         default=None,
-        help="Agent for initial runs: built-in name (e.g., terminus-2) or import path. Defaults to terminus-2.",
+        help="Agent for initial runs: registry name or Harbor agent name (e.g. terminus-2). Defaults to terminus-2.",
     )
     parser.add_argument(
         "--recovery-agent",
         type=str,
         default="recovery-terminus",
-        help=(
-            "Recovery agent: registry name (e.g. recovery-terminus), "
-            "import path (e.g. module:Class), or installed:<name> "
-            "(e.g. installed:claude-code) to wrap a Harbor agent"
-        ),
+        help="Recovery agent registry name (e.g. recovery-terminus, recovery-claude-code).",
     )
     parser.add_argument(
         "--job-name",
