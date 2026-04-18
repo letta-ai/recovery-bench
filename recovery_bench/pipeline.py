@@ -38,9 +38,6 @@ MAX_INSTRUCTION_BYTES = 64_000
 
 RECOVERY_SETUP_TIMEOUT_MULTIPLIER = 3.0
 
-# Import path for the generic recovery wrapper
-_RECOVERY_INSTALLED_AGENT = "recovery_bench.agents.base:RecoveryInstalledAgent"
-
 
 def _estimate_recovery_size(task_name: str, traces_folder: str) -> int:
     """Estimate the byte length of the recovery instruction for a task.
@@ -94,11 +91,10 @@ def filter_oversized_tasks(
 def resolve_agent(agent_str: str) -> tuple[str, bool, dict[str, str]]:
     """Resolve an agent string to (agent_ref, is_import_path, extra_agent_kwargs).
 
-    Handles four formats:
-    1. Import path (contains ':'): pass through as --agent-import-path
-    2. Registry name (in AGENT_REGISTRY): look up import path
-    3. 'installed:<name>': route to RecoveryInstalledAgent with wrapped_agent kwarg
-    4. Plain Harbor agent name (e.g. 'terminus-2'): pass through as --agent
+    Handles three formats:
+    1. Registry name (in AGENT_REGISTRY): look up import path
+    2. Import path (contains ':'): pass through as --agent-import-path
+    3. Plain Harbor agent name (e.g. 'terminus-2'): pass through as --agent
 
     Returns:
         (agent_ref, is_import_path, extra_kwargs)
@@ -107,20 +103,15 @@ def resolve_agent(agent_str: str) -> tuple[str, bool, dict[str, str]]:
           False if it should be passed via --agent
         - extra_kwargs: additional --agent-kwarg flags to pass to harbor run
     """
-    # Case 3: installed:<name>
-    if agent_str.startswith("installed:"):
-        harbor_agent_name = agent_str.split(":", 1)[1]
-        return _RECOVERY_INSTALLED_AGENT, True, {"wrapped_agent": harbor_agent_name}
-
-    # Case 2: registry name
+    # Case 1: registry name
     if agent_str in AGENT_REGISTRY:
         return AGENT_REGISTRY[agent_str], True, {}
 
-    # Case 1: import path (contains ':')
+    # Case 2: import path (contains ':')
     if ":" in agent_str:
         return agent_str, True, {}
 
-    # Case 4: plain Harbor agent name (e.g. 'terminus-2')
+    # Case 3: plain Harbor agent name (e.g. 'terminus-2')
     return agent_str, False, {}
 
 
@@ -245,7 +236,7 @@ def generate_recovery_traces(
         model: Model name for the recovery agent.
         task_ids: Task IDs to run recovery on.
         job_name: Job name for output directory.
-        agent: Recovery agent name, import path, or installed:<name>.
+        agent: Recovery agent registry name or import path.
         n_concurrent: Number of concurrent processes.
         agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
@@ -295,7 +286,7 @@ def run_recovery(
         traces_folder: Path to initial traces directory.
         model: Model name for the recovery agent.
         job_name: Job name for output directory.
-        agent: Recovery agent name, import path, or installed:<name>.
+        agent: Recovery agent registry name or import path.
         n_concurrent: Number of concurrent processes.
         task_ids: Specific task IDs to recover. None = auto-detect unsolved.
         agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
@@ -375,7 +366,7 @@ def run_pipeline(
             None = skip recovery.
         resume_initial: Path to existing initial traces (skips generation).
         initial_agent: Agent name or import path for initial traces.
-        recovery_agent: Recovery agent name, import path, or installed:<name>.
+        recovery_agent: Recovery agent registry name or import path.
         task_ids: Specific task IDs to run.
         n_concurrent: Number of concurrent processes.
         dataset_version: Terminal-Bench dataset version.

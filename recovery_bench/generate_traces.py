@@ -78,9 +78,8 @@ def main():
         type=str,
         default="recovery-terminus",
         help=(
-            "Recovery agent: registry name (e.g. recovery-terminus), "
-            "import path (e.g. module:Class), or installed:<name> "
-            "(e.g. installed:claude-code) to wrap a Harbor agent"
+            "Recovery agent: registry name (e.g. recovery-terminus, "
+            "recovery-claude-code) or import path (e.g. module:Class)"
         ),
     )
     parser.add_argument(

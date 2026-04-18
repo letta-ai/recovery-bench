@@ -1,8 +1,7 @@
 """Shared recovery mixin for all recovery agents.
 
 Provides the common trajectory parsing, message storage, and recovery
-instruction building used by RecoveryTerminus, RecoveryLettaCode, and
-RecoveryInstalledAgent.
+instruction building used by all agents in recovery_bench.agents.recovery.
 """
 
 import os

@@ -1,0 +1,134 @@
+"""RecoveryTerminus - Extends Harbor's Terminus2 with trajectory replay for recovery.
+
+This agent reads previous failed trajectories, replays commands to restore
+the environment state during setup(), then runs Terminus2's agent loop
+with a recovery-oriented prompt.
+
+Message modes (controlled via ``message_mode`` kwarg):
+- ``full``: Inject full message history from previous trajectory
+- ``none``: Environment-only recovery (no message context)
+- ``summary``: Summarize previous messages and inject summary
+"""
+
+import logging
+from datetime import datetime, timezone
+
+from harbor.agents.terminus_2.terminus_2 import Terminus2
+from harbor.environments.base import BaseEnvironment
+from harbor.llms.chat import Chat
+from harbor.models.agent.context import AgentContext
+from harbor.models.trajectories import Step
+
+from recovery_bench.agents.recovery_mixin import RecoveryMixin
+from recovery_bench.replay import replay_via_tmux
+from recovery_bench.utils import save_usage
+
+logger = logging.getLogger(__name__)
+
+
+class RecoveryTerminus(RecoveryMixin, Terminus2):
+    """Terminus2 agent extended with trajectory replay for recovery.
+
+    During setup(), reads a previous failed trajectory, replays all commands
+    to restore the corrupted environment state. During run(), optionally
+    injects prior messages and runs Terminus2's agent loop with a recovery
+    prompt.
+
+    Args:
+        message_mode: How to use messages from the previous trajectory.
+            ``"full"`` injects raw messages, ``"none"`` skips them,
+            ``"summary"`` summarizes via LLM first.  Default: ``"full"``.
+        model_kwargs: Extra model kwargs forwarded to Terminus2.
+    """
+
+    def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
+        super().__init__(**(model_kwargs or {}), **kwargs)
+        self._init_recovery(message_mode)
+        self._last_replay_output = ""
+
+    @staticmethod
+    def name() -> str:
+        return "recovery-terminus"
+
+    async def setup(self, environment: BaseEnvironment) -> None:
+        """Setup: start tmux (via Terminus2), then read and replay trajectories."""
+        await super().setup(environment)
+
+        # Read and replay trajectories during setup (not counted against agent timeout)
+        commands, _ = self._parse_trajectory()
+        if commands:
+            self._last_replay_output = await replay_via_tmux(self._session, commands)
+            logger.info(f"Replayed {len(commands)} commands from previous trajectory")
+        else:
+            logger.info("No commands found in trajectory, starting fresh")
+            self._last_replay_output = ""
+
+    def _populate_context(self, context: AgentContext) -> None:
+        """Populate *context* with metrics, dump trajectory, and save usage.
+
+        This mirrors the ``finally`` block in ``Terminus2.run()`` — keep in
+        sync when upgrading the harbor dependency.  Last synced: harbor 0.4.0.
+        """
+        context.rollout_details = self._chat.rollout_details + self._subagent_rollout_details
+        context.n_input_tokens = (
+            self._chat.total_input_tokens + self._subagent_metrics.total_prompt_tokens
+        )
+        context.n_output_tokens = (
+            self._chat.total_output_tokens + self._subagent_metrics.total_completion_tokens
+        )
+        context.n_cache_tokens = (
+            self._chat.total_cache_tokens + self._subagent_metrics.total_cached_tokens
+        )
+        total_cost = self._chat.total_cost + self._subagent_metrics.total_cost_usd
+        context.cost_usd = total_cost if total_cost > 0 else None
+        context.metadata = {
+            "n_episodes": self._n_episodes,
+            "api_request_times_msec": self._api_request_times,
+            "summarization_count": self._summarization_count,
+        }
+        if self._store_all_messages:
+            context.metadata["all_messages"] = self._chat.messages
+
+        self._dump_trajectory()
+        save_usage(self.logs_dir, context)
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """Build a recovery prompt and run Terminus2's agent loop."""
+        self._chat = Chat(self._llm, interleaved_thinking=self._interleaved_thinking)
+        self._context = context
+
+        if self._session is None:
+            raise RuntimeError("Session is not set")
+
+        # Build recovery prompt using terminus2's template format
+        terminal_state = self._limit_output_length(self._last_replay_output)
+        recovery_instruction = await self._build_recovery_instruction(instruction)
+
+        initial_prompt = self._prompt_template.format(
+            instruction=recovery_instruction,
+            terminal_state=terminal_state,
+        )
+
+        self._trajectory_steps.append(
+            Step(
+                step_id=1,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                source="user",
+                message=initial_prompt,
+            )
+        )
+
+        try:
+            await self._run_agent_loop(
+                initial_prompt=initial_prompt,
+                chat=self._chat,
+                logging_dir=self.logs_dir,
+                original_instruction=instruction,
+            )
+        finally:
+            self._populate_context(context)
