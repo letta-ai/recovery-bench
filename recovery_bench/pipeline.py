@@ -162,7 +162,7 @@ def _build_harbor_cmd(
         cmd.extend(["--env", harbor_env])
     if task_ids:
         for task_id in task_ids:
-            cmd.extend(["--task-name", task_id])
+            cmd.extend(["--include-task-name", task_id])
 
     # Append --agent-kwarg flags
     all_kwargs = {**(agent_kwargs or {}), **(extra_kwargs or {})}

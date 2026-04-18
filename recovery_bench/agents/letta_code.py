@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
+from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
@@ -48,13 +48,27 @@ class LettaCode(BaseInstalledAgent):
     def name() -> str:
         return "letta-code"
 
-    @property
-    def _install_agent_template_path(self) -> Path:
-        return Path(__file__).parent / "install-letta-code.sh.j2"
+    async def install(self, environment: BaseEnvironment) -> None:
+        """Install Node.js, Bun, and build letta-code CLI from source.
 
-    def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
-        # Unused — we override run() directly — but required by the ABC.
-        return []
+        Runs as a single exec call to avoid burning the setup timeout budget
+        on multiple Modal round-trips.
+        """
+        await self.exec_as_root(
+            environment,
+            command=(
+                # System deps + Node.js
+                "apt-get update && apt-get install -y curl git unzip build-essential && "
+                "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && "
+                "apt-get install -y nodejs && "
+                # Bun + build letta-code from source
+                "curl -fsSL https://bun.sh/install | bash && "
+                'export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH" && '
+                "git clone https://github.com/letta-ai/letta-code.git /tmp/letta-code && "
+                "cd /tmp/letta-code && git checkout v0.19.9 && "
+                "bun install && bun run build && npm link"
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -215,10 +229,6 @@ class LettaCode(BaseInstalledAgent):
         except Exception as e:
             logger.warning(f"Failed to extract usage in populate_context_post_run: {e}")
 
-    async def setup(self, environment: BaseEnvironment) -> None:
-        """Install the letta CLI inside the task container."""
-        await super().setup(environment)
-
     async def run(
         self,
         instruction: str,
@@ -250,7 +260,7 @@ class LettaCode(BaseInstalledAgent):
             tmpf.write(full_instruction)
             local_instr_path = tmpf.name
         try:
-            await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
+            await self.exec_as_root(environment, command="mkdir -p /installed-agent")
             await environment.upload_file(local_instr_path, "/installed-agent/instruction.txt")
         finally:
             try:
@@ -297,13 +307,16 @@ class LettaCode(BaseInstalledAgent):
                 pass
 
         try:
-            await environment.exec("bash -lc 'mkdir -p /installed-agent'", timeout_sec=None)
+            await self.exec_as_root(environment, command="mkdir -p /installed-agent")
             tmp_script_path = "/installed-agent/run-letta.sh"
             await environment.upload_file(str(run_script_path), tmp_script_path)
-            await environment.exec(f"bash -lc 'chmod +x {tmp_script_path}'", timeout_sec=None)
+            await self.exec_as_root(environment, command=f"chmod +x {tmp_script_path}")
 
             asyncio.create_task(_capture_settings_after_delay())
 
+            # Use environment.exec() directly — the letta CLI may exit non-zero
+            # and we still need to collect logs afterwards.  exec_as_agent()
+            # raises NonZeroAgentExitCodeError which would abort log collection.
             result = await environment.exec(
                 f"bash -lc 'bash {tmp_script_path}'",
                 env=agent_env or None,
