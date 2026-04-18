@@ -3,15 +3,11 @@
 Used to compare "strong model from scratch" vs "strong model with recovery".
 """
 
-import logging
-
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from recovery_bench.utils import save_usage
-
-logger = logging.getLogger(__name__)
 
 
 class BaselineTerminus(Terminus2):
