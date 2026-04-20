@@ -1,9 +1,6 @@
 """Recovery agent for Harbor's OpenHands SDK installed agent.
 
-Harbor 0.4.0 stores ``reasoning_effort`` but never forwards it to the
-runner script.  We patch the uploaded runner to read a
-``REASONING_EFFORT`` env var and pass it to the SDK's ``LLM()``
-constructor, which handles provider-specific mapping internally.
+The V1 SDK defaults to reasoning_effort='high', so no extra config needed.
 """
 
 import logging
@@ -24,35 +21,11 @@ class RecoveryOpenHandsSDK(RecoveryMixin, OpenHandsSDK):
 
     def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
         super().__init__(**(model_kwargs or {}), **kwargs)
-        if self._reasoning_effort:
-            self._extra_env["REASONING_EFFORT"] = self._reasoning_effort
         self._init_recovery(message_mode)
 
     @staticmethod
     def name() -> str:
         return "recovery-openhands-sdk"
-
-    async def install(self, environment: BaseEnvironment) -> None:
-        await super().install(environment)
-        # Patch the runner to forward REASONING_EFFORT to LLM().
-        local_runner = self.logs_dir / "run_agent.py"
-        content = local_runner.read_text()
-        content = content.replace(
-            "    llm = LLM(**llm_kwargs)",
-            '    _re = os.environ.get("REASONING_EFFORT")\n'
-            "    if _re:\n"
-            '        llm_kwargs["reasoning_effort"] = _re\n'
-            "    llm = LLM(**llm_kwargs)",
-        )
-        local_runner.write_text(content)
-        await environment.upload_file(
-            source_path=local_runner,
-            target_path="/installed-agent/run_agent.py",
-        )
-        await environment.exec(
-            command="chmod +x /installed-agent/run_agent.py",
-            user="root",
-        )
 
     async def setup(self, environment: BaseEnvironment) -> None:
         await super().setup(environment)
