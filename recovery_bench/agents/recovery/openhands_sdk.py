@@ -1,13 +1,9 @@
 """Recovery agent for Harbor's OpenHands SDK installed agent.
 
-Works around a Harbor 0.4.0 gap: the adapter stores ``reasoning_effort``
-but never forwards it to the runner script.  We patch the uploaded runner
-to read ``REASONING_EFFORT`` and ``EXTENDED_THINKING_BUDGET`` env vars and
-pass them to the SDK's ``LLM()`` constructor.
-
-The V1 SDK's LLM class uses two levers:
-- ``reasoning_effort`` — for OpenAI models (stripped for Claude by the SDK)
-- ``extended_thinking_budget`` — for Anthropic models (default 200k tokens)
+Harbor 0.4.0 stores ``reasoning_effort`` but never forwards it to the
+runner script.  We patch the uploaded runner to read a
+``REASONING_EFFORT`` env var and pass it to the SDK's ``LLM()``
+constructor, which handles provider-specific mapping internally.
 """
 
 import logging
@@ -27,16 +23,9 @@ class RecoveryOpenHandsSDK(RecoveryMixin, OpenHandsSDK):
     """OpenHands SDK agent extended with trajectory replay for recovery."""
 
     def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
-        model_kwargs = dict(model_kwargs or {})
-        self._extended_thinking_budget: int | None = model_kwargs.pop(
-            "extended_thinking_budget", None
-        )
-        super().__init__(**model_kwargs, **kwargs)
-        # Expose as env vars so the patched runner can forward to LLM().
+        super().__init__(**(model_kwargs or {}), **kwargs)
         if self._reasoning_effort:
             self._extra_env["REASONING_EFFORT"] = self._reasoning_effort
-        if self._extended_thinking_budget is not None:
-            self._extra_env["EXTENDED_THINKING_BUDGET"] = str(self._extended_thinking_budget)
         self._init_recovery(message_mode)
 
     @staticmethod
@@ -45,8 +34,7 @@ class RecoveryOpenHandsSDK(RecoveryMixin, OpenHandsSDK):
 
     async def install(self, environment: BaseEnvironment) -> None:
         await super().install(environment)
-        # Patch the runner to forward REASONING_EFFORT (OpenAI) and
-        # EXTENDED_THINKING_BUDGET (Anthropic) to LLM().
+        # Patch the runner to forward REASONING_EFFORT to LLM().
         local_runner = self.logs_dir / "run_agent.py"
         content = local_runner.read_text()
         content = content.replace(
@@ -54,9 +42,6 @@ class RecoveryOpenHandsSDK(RecoveryMixin, OpenHandsSDK):
             '    _re = os.environ.get("REASONING_EFFORT")\n'
             "    if _re:\n"
             '        llm_kwargs["reasoning_effort"] = _re\n'
-            '    _etb = os.environ.get("EXTENDED_THINKING_BUDGET")\n'
-            "    if _etb:\n"
-            '        llm_kwargs["extended_thinking_budget"] = int(_etb)\n'
             "    llm = LLM(**llm_kwargs)",
         )
         local_runner.write_text(content)
