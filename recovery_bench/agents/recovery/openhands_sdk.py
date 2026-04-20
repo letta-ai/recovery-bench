@@ -1,4 +1,13 @@
-"""Recovery agent for Harbor's OpenHands SDK installed agent."""
+"""Recovery agent for Harbor's OpenHands SDK installed agent.
+
+Works around a Harbor 0.4.0 gap: the adapter stores ``reasoning_effort``
+but never forwards it to the runner script.  We fix this by:
+
+1. Setting ``REASONING_EFFORT`` in ``_extra_env`` so it reaches the
+   container's environment on every exec call.
+2. Patching the uploaded runner script (``install()``) to read that env
+   var and pass it to the SDK's ``LLM()`` constructor.
+"""
 
 import logging
 
@@ -14,20 +23,43 @@ logger = logging.getLogger(__name__)
 
 
 class RecoveryOpenHandsSDK(RecoveryMixin, OpenHandsSDK):
-    """OpenHands SDK agent extended with trajectory replay for recovery.
-
-    Note on reasoning_effort: The Harbor adapter stores the constructor param
-    but does not wire it to the runner in Harbor 0.4.0.  We still forward it
-    for forward compatibility with future Harbor / SDK versions.
-    """
+    """OpenHands SDK agent extended with trajectory replay for recovery."""
 
     def __init__(self, message_mode: str = "full", model_kwargs: dict = None, **kwargs):
         super().__init__(**(model_kwargs or {}), **kwargs)
+        # Bridge the Harbor gap: expose reasoning_effort as an env var
+        # so our patched runner can forward it to the SDK's LLM().
+        if self._reasoning_effort:
+            self._extra_env["REASONING_EFFORT"] = self._reasoning_effort
         self._init_recovery(message_mode)
 
     @staticmethod
     def name() -> str:
         return "recovery-openhands-sdk"
+
+    async def install(self, environment: BaseEnvironment) -> None:
+        await super().install(environment)
+        # Patch the runner script to read REASONING_EFFORT from env and
+        # pass it to LLM().  Harbor 0.4.0's runner omits this.
+        if self._reasoning_effort:
+            local_runner = self.logs_dir / "run_agent.py"
+            content = local_runner.read_text()
+            content = content.replace(
+                "    llm = LLM(**llm_kwargs)",
+                '    reasoning_effort = os.environ.get("REASONING_EFFORT")\n'
+                "    if reasoning_effort:\n"
+                '        llm_kwargs["reasoning_effort"] = reasoning_effort\n'
+                "    llm = LLM(**llm_kwargs)",
+            )
+            local_runner.write_text(content)
+            await environment.upload_file(
+                source_path=local_runner,
+                target_path="/installed-agent/run_agent.py",
+            )
+            await environment.exec(
+                command="chmod +x /installed-agent/run_agent.py",
+                user="root",
+            )
 
     async def setup(self, environment: BaseEnvironment) -> None:
         await super().setup(environment)
