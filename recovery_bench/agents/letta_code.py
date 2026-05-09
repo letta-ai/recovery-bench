@@ -47,24 +47,69 @@ class LettaCode(BaseInstalledAgent):
         return "letta-code"
 
     async def install(self, environment: BaseEnvironment) -> None:
-        """Install Node.js, Bun, and build letta-code CLI from source.
+        """Install Node.js 20 + Bun, then build letta-code CLI from source (main).
+
+        Letta Code requires Node.js 18+ and git at runtime, plus a C++
+        toolchain at install time because its ``node-pty`` dependency falls
+        back to ``node-gyp rebuild`` when no matching prebuilt binary is
+        available (common on Ubuntu Noble). We install ``build-essential``
+        with ``--no-install-recommends`` to get just gcc/g++/make/libc-dev
+        without the heavier recommended extras.
+
+        Always installs Node.js from NodeSource (rather than short-circuiting
+        on an existing ``node`` binary). Some Ubuntu images ship ``node``
+        without ``npm`` — trusting a pre-existing ``node`` caused npm-missing
+        install failures. NodeSource's ``nodejs`` deb bundles both binaries
+        at a known version, so installing unconditionally is simpler and
+        more reliable than trying to detect and patch partial installs.
 
         Runs as a single exec call to avoid burning the setup timeout budget
-        on multiple Modal round-trips.
+        on multiple Modal round-trips. Output is redirected to
+        ``/tmp/install.log``; on failure the tail is dumped to stderr so
+        the Harbor trial log captures the real error.
         """
         await self.exec_as_root(
             environment,
             command=(
-                # System deps + Node.js
-                "apt-get update && apt-get install -y curl git unzip build-essential && "
-                "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && "
-                "apt-get install -y nodejs && "
-                # Bun + build letta-code from source
-                "curl -fsSL https://bun.sh/install | bash && "
-                'export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH" && '
-                "git clone https://github.com/letta-ai/letta-code.git /tmp/letta-code && "
-                "cd /tmp/letta-code && git checkout v0.19.9 && "
-                "bun install && bun run build && npm link"
+                "( set -e; "
+                "export DEBIAN_FRONTEND=noninteractive; "
+                "echo '[install] apt update' && "
+                "apt-get update -qq >/dev/null && "
+                "echo '[install] apt install deps' && "
+                # build-essential is needed for node-pty's node-gyp fallback;
+                # --no-install-recommends keeps it to ~100MB (vs ~350MB).
+                # unzip is needed by the bun installer.
+                "apt-get install -y -qq --no-install-recommends "
+                "ca-certificates curl git unzip build-essential python3 >/dev/null && "
+                # Always install Node.js 20 from NodeSource. The deb bundles
+                # both `node` and `npm`, so this guarantees a consistent
+                # node+npm pair regardless of what the base image ships.
+                "echo '[install] nodesource setup' && "
+                "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null && "
+                "echo '[install] apt install nodejs' && "
+                "apt-get install -y -qq --no-install-recommends nodejs >/dev/null && "
+                # Bun for fast install + build of letta-code from source.
+                "echo '[install] bun install' && "
+                "curl -fsSL https://bun.sh/install | bash >/dev/null && "
+                'export BUN_INSTALL="$HOME/.bun" && '
+                'export PATH="$BUN_INSTALL/bin:$PATH" && '
+                "echo '[install] git clone letta-code (main)' && "
+                "git clone --depth 1 --branch main "
+                "https://github.com/letta-ai/letta-code.git /tmp/letta-code && "
+                "cd /tmp/letta-code && "
+                "echo '[install] bun install deps' && "
+                "bun install && "
+                "echo '[install] bun run build' && "
+                "bun run build && "
+                "echo '[install] npm link' && "
+                "npm link --no-fund --no-audit && "
+                "echo '[install] done' "
+                # Redirect the whole block to a log; on failure, tail to
+                # stderr so the Harbor trial log captures the real error.
+                ") > /tmp/install.log 2>&1 "
+                "|| { echo '--- letta-code install failed; tail of /tmp/install.log: ---' >&2; "
+                "tail -n 80 /tmp/install.log >&2; exit 1; } "
+                "&& letta --version"
             ),
         )
 
@@ -386,4 +431,3 @@ class LettaCode(BaseInstalledAgent):
             (logs_dir / f"letta_agent_export_{ts}.af").write_bytes(agent_bytes)
         except Exception:
             pass
-

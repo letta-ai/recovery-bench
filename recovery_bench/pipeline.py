@@ -147,6 +147,7 @@ def generate_initial_traces(
     agent: str | None = None,
     agent_kwargs: dict | None = None,
     harbor_env: str | None = None,
+    message_mode: str | None = None,
 ) -> str:
     """Generate initial traces using harbor run.
 
@@ -159,6 +160,8 @@ def generate_initial_traces(
         agent: Registry name or Harbor agent name. None = terminus-2.
         agent_kwargs: Extra kwargs forwarded to the agent via --agent-kwarg.
         harbor_env: Harbor sandbox backend (e.g. docker, daytona, modal).
+        message_mode: Forwarded to recovery agents used as initial-run
+            baselines.  Pass ``"initial"`` to skip replay/preamble.
 
     Returns:
         Path to the output job directory (e.g. "jobs/<job_name>").
@@ -177,6 +180,7 @@ def generate_initial_traces(
         task_ids=task_ids,
         agent_kwargs=agent_kwargs,
         harbor_env=harbor_env,
+        message_mode=message_mode,
     )
 
     result = run_command(cmd)
@@ -376,6 +380,7 @@ def run_pipeline(
             agent=initial_agent,
             agent_kwargs=initial_agent_kwargs,
             harbor_env=harbor_env,
+            message_mode=message_mode,
         )
 
     # Aggregate usage for initial traces

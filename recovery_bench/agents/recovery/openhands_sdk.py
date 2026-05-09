@@ -10,7 +10,6 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from recovery_bench.agents.recovery_mixin import RecoveryMixin
-from recovery_bench.replay import replay_via_exec
 from recovery_bench.utils import save_usage
 
 logger = logging.getLogger(__name__)
@@ -29,10 +28,7 @@ class RecoveryOpenHandsSDK(RecoveryMixin, OpenHandsSDK):
 
     async def setup(self, environment: BaseEnvironment) -> None:
         await super().setup(environment)
-        commands, _ = self._parse_trajectory()
-        if commands:
-            await replay_via_exec(environment, commands)
-            logger.info(f"Replayed {len(commands)} commands from previous trajectory")
+        await self._maybe_replay_exec(environment)
 
     async def run(
         self,

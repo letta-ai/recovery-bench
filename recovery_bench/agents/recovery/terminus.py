@@ -8,6 +8,7 @@ Message modes (controlled via ``message_mode`` kwarg):
 - ``full``: Inject full message history from previous trajectory
 - ``none``: Environment-only recovery (no message context)
 - ``summary``: Summarize previous messages and inject summary
+- ``initial``: Skip replay and preamble — behave as a fresh initial run
 """
 
 import logging
@@ -20,7 +21,6 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step
 
 from recovery_bench.agents.recovery_mixin import RecoveryMixin
-from recovery_bench.replay import replay_via_tmux
 from recovery_bench.utils import save_usage
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,9 @@ class RecoveryTerminus(RecoveryMixin, Terminus2):
     Args:
         message_mode: How to use messages from the previous trajectory.
             ``"full"`` injects raw messages, ``"none"`` skips them,
-            ``"summary"`` summarizes via LLM first.  Default: ``"full"``.
+            ``"summary"`` summarizes via LLM first, ``"initial"`` skips
+            both replay and preamble for a vanilla initial run.
+            Default: ``"full"``.
         model_kwargs: Extra model kwargs forwarded to Terminus2.
     """
 
@@ -53,15 +55,9 @@ class RecoveryTerminus(RecoveryMixin, Terminus2):
     async def setup(self, environment: BaseEnvironment) -> None:
         """Setup: start tmux (via Terminus2), then read and replay trajectories."""
         await super().setup(environment)
-
-        # Read and replay trajectories during setup (not counted against agent timeout)
-        commands, _ = self._parse_trajectory()
-        if commands:
-            self._last_replay_output = await replay_via_tmux(self._session, commands)
-            logger.info(f"Replayed {len(commands)} commands from previous trajectory")
-        else:
-            logger.info("No commands found in trajectory, starting fresh")
-            self._last_replay_output = ""
+        # Replay during setup (not counted against agent timeout).
+        # No-op when message_mode == "initial".
+        self._last_replay_output = await self._maybe_replay_tmux(self._session)
 
     def _populate_context(self, context: AgentContext) -> None:
         """Populate *context* with metrics, dump trajectory, and save usage.

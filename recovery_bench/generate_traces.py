@@ -94,9 +94,14 @@ def main():
     parser.add_argument(
         "--message-mode",
         type=str,
-        choices=["full", "none", "summary"],
+        choices=["full", "none", "summary", "initial"],
         default="full",
-        help="How recovery agents use messages from previous trajectory (default: full)",
+        help=(
+            "How recovery agents use messages from previous trajectory "
+            "(default: full). Use 'initial' to skip trajectory replay and "
+            "the recovery preamble entirely — turns a recovery agent into "
+            "a vanilla initial-run baseline for head-to-head comparison."
+        ),
     )
     args = parser.parse_args()
 
@@ -109,6 +114,19 @@ def main():
 
     if args.resume_initial and not args.recovery_model:
         parser.error("--recovery-model is required when using --resume-initial")
+
+    if args.message_mode == "initial" and args.recovery_model:
+        parser.error(
+            "--message-mode initial is for initial-only baselines and cannot be "
+            "combined with --recovery-model (the recovery pass would have nothing "
+            "to recover from)"
+        )
+
+    if args.message_mode == "initial" and args.resume_initial:
+        parser.error(
+            "--message-mode initial is for initial-only baselines and cannot be "
+            "combined with --resume-initial (resume implies running recovery)"
+        )
 
     return run_pipeline(
         initial_model=args.initial_model,

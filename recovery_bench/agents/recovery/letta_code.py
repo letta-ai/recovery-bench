@@ -7,7 +7,6 @@ from harbor.models.agent.context import AgentContext
 
 from recovery_bench.agents.letta_code import LettaCode
 from recovery_bench.agents.recovery_mixin import RecoveryMixin
-from recovery_bench.replay import replay_via_exec
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,9 @@ class RecoveryLettaCode(RecoveryMixin, LettaCode):
     Args:
         message_mode: How to use messages from the previous trajectory.
             ``"full"`` includes the full transcript, ``"none"`` skips them,
-            ``"summary"`` summarizes via LLM first.  Default: ``"full"``.
+            ``"summary"`` summarizes via LLM first, ``"initial"`` skips
+            both replay and preamble for a vanilla initial run.
+            Default: ``"full"``.
     """
 
     def __init__(self, *args, message_mode: str = "full", **kwargs):
@@ -37,14 +38,7 @@ class RecoveryLettaCode(RecoveryMixin, LettaCode):
     async def setup(self, environment: BaseEnvironment) -> None:
         """Install LettaCode, then replay the failed trajectory."""
         await super().setup(environment)
-
-        commands, _ = self._parse_trajectory()
-        if not commands:
-            logger.info("No operations found in trajectory, will run LettaCode fresh")
-            return
-
-        logger.info(f"Replaying {len(commands)} operations from previous trajectory...")
-        await replay_via_exec(environment, commands)
+        await self._maybe_replay_exec(environment)
 
     async def run(
         self,

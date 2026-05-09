@@ -81,6 +81,26 @@ Works with any Harbor (installed) agent: `installed:codex`, `installed:gemini-cl
 | `full` (default) | Full transcript of the previous conversation |
 | `summary` | LLM-generated summary of what was tried and what went wrong |
 | `none` | Nothing — only the replayed environment and original task |
+| `initial` | Skips replay AND preamble — turns a recovery agent into a vanilla initial-run baseline (useful for head-to-head comparison). Cannot be combined with `--recovery-model` or `--resume-initial`. |
+
+#### Running a recovery agent as an initial-only baseline
+
+Use `--message-mode initial` when you want the same model + config plumbing
+as a recovery run but no replay or recovery framing — so you can compare
+e.g. native Claude Code or Codex against `letta-code` on Terminal-Bench:
+
+```bash
+# Claude Code as a vanilla initial-run baseline (no recovery)
+python -m recovery_bench.generate_traces \
+    --initial-model configs/claude-code/opus-47-high.json \
+    --initial-agent recovery-claude-code \
+    --message-mode initial \
+    --dataset-version 2.0
+```
+
+This works with any `recovery-*` agent (`recovery-codex`,
+`recovery-gemini-cli`, `recovery-letta-code`, etc.) and reuses your existing
+JSON configs unchanged.
 
 ---
 
@@ -113,7 +133,7 @@ python -m recovery_bench.generate_traces \
 | `--initial-agent` | Registry name or import path | `terminus-2` |
 | `--recovery-model` | Model for recovery | Omit to skip recovery |
 | `--recovery-agent` | Registry name, import path, or `installed:<name>` | `recovery-terminus` |
-| `--message-mode` | `full`, `none`, or `summary` | `full` |
+| `--message-mode` | `full`, `none`, `summary`, or `initial` | `full` |
 | `--resume-initial` | Path to existing initial traces | — |
 | `--task-id` | Task ID (repeatable) | All tasks |
 | `--n-concurrent` | Parallel processes | `8` |
