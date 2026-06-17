@@ -93,8 +93,8 @@ class LettaCode(BaseInstalledAgent):
                 "curl -fsSL https://bun.sh/install | bash >/dev/null && "
                 'export BUN_INSTALL="$HOME/.bun" && '
                 'export PATH="$BUN_INSTALL/bin:$PATH" && '
-                "echo '[install] git clone letta-code (main)' && "
-                "git clone --depth 1 --branch main "
+                "echo '[install] git clone letta-code (kevin/anthropic-tool-update-parity)' && "
+                "git clone --depth 1 --branch kevin/anthropic-tool-update-parity "
                 "https://github.com/letta-ai/letta-code.git /tmp/letta-code && "
                 "cd /tmp/letta-code && "
                 "echo '[install] bun install deps' && "
