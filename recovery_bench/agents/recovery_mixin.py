@@ -12,6 +12,7 @@ from harbor.environments.base import BaseEnvironment
 from recovery_bench.prompts import build_message_context, build_recovery_instruction
 from recovery_bench.replay import (
     ReplayCommand,
+    VerifierSignal,
     find_and_parse_trajectory,
     replay_via_exec,
     replay_via_tmux,
@@ -45,6 +46,7 @@ class RecoveryMixin:
     _message_mode: str
     _trajectory_folder: str
     _replay_messages: list[dict]
+    _verifier_signal: VerifierSignal | None
 
     def _init_recovery(self, message_mode: str = "full") -> None:
         """Initialize common recovery state."""
@@ -56,6 +58,7 @@ class RecoveryMixin:
         self._message_mode = message_mode
         self._trajectory_folder = os.getenv("TRAJECTORY_FOLDER", DEFAULT_TRAJECTORY_FOLDER)
         self._replay_messages: list[dict] = []
+        self._verifier_signal = None
 
     def is_initial_mode(self) -> bool:
         """True when this agent should behave as a pure initial-run baseline."""
@@ -64,14 +67,20 @@ class RecoveryMixin:
     def _parse_trajectory(self) -> tuple[list[ReplayCommand], list[dict]]:
         """Find and parse trajectory for the current task.
 
-        Stores messages in ``_replay_messages`` for later use in
+        Stores messages in ``_replay_messages`` and the verifier signal
+        in ``_verifier_signal`` for later use in
         ``_build_recovery_instruction``.
 
         Returns:
-            (commands, messages) tuple.
+            (commands, messages) tuple.  The verifier signal is stored
+            on ``self`` rather than returned to keep call-site changes
+            minimal — replay only needs commands+messages.
         """
-        commands, messages = find_and_parse_trajectory(self.logs_dir, self._trajectory_folder)
+        commands, messages, verifier_signal = find_and_parse_trajectory(
+            self.logs_dir, self._trajectory_folder
+        )
         self._replay_messages = messages
+        self._verifier_signal = verifier_signal
         return commands, messages
 
     async def _maybe_replay_exec(self, environment: BaseEnvironment) -> None:
@@ -111,11 +120,20 @@ class RecoveryMixin:
         When ``message_mode == "initial"`` returns the raw instruction
         unchanged (no preamble, no prior context) — the agent runs as
         a fresh initial baseline.
+
+        When ``message_mode == "summary"`` and ``self.logs_dir`` is
+        available, the summarizer's prompt and response are persisted
+        under that directory for post-hoc inspection.
         """
         if self.is_initial_mode():
             return instruction
         model = getattr(self, "model_name", "") or ""
+        log_dir = getattr(self, "logs_dir", None)
         message_context = await build_message_context(
-            self._replay_messages, self._message_mode, model
+            self._replay_messages,
+            self._message_mode,
+            model,
+            log_dir=log_dir,
+            verifier_signal=self._verifier_signal,
         )
         return build_recovery_instruction(instruction, message_context)
